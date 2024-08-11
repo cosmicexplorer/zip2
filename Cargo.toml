@@ -13,6 +13,7 @@ keywords = ["zip", "archive", "compression"]
 # Any change to rust-version must be reflected also in `README.md` and `.github/workflows/ci.yaml`.
 # The MSRV policy is documented in `README.md`.
 rust-version = "1.83.0"
+categories = ["compression", "filesystem", "parser-implementations"]
 description = """
 Library to support the reading and writing of zip files.
 """
@@ -25,6 +26,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [workspace.dependencies]
 time = { version = "0.3.37", default-features = false }
+arbitrary = { version = "1.4.1", features = ["derive"] }
+zip = { path = ".", default-features = false }
 
 [dependencies]
 aes = { version = "0.8", optional = true }
@@ -53,7 +56,7 @@ lzma-rust2 = { version = "0.13", optional = true, default-features = false, feat
 bitstream-io =  { version = "4.5.0", optional = true }
 
 [target.'cfg(fuzzing)'.dependencies]
-arbitrary = { version = "1.4.1", features = ["derive"] }
+arbitrary.workspace = true
 
 [dev-dependencies]
 bencher = "0.1.5"
