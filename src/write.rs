@@ -15,8 +15,6 @@ use crate::types::{
     ZipRawValues, MIN_VERSION,
 };
 use crate::write::ffi::S_IFLNK;
-#[cfg(any(feature = "_deflate-any", feature = "bzip2", feature = "zstd",))]
-use core::num::NonZeroU64;
 use crc32fast::Hasher;
 use indexmap::IndexMap;
 use std::borrow::ToOwned;
@@ -253,6 +251,7 @@ impl<'a> arbitrary::Arbitrary<'a> for EncryptWith<'a> {
 }
 
 /// Metadata for a file to be written
+/* TODO: add accessors for this data as well so options can be introspected! */
 #[derive(Clone, Debug, Copy, Eq, PartialEq)]
 pub struct FileOptions<'k, T: FileOptionExtension> {
     pub(crate) compression_method: CompressionMethod,
@@ -780,6 +779,8 @@ impl<A: Read + Write + Seek> ZipWriter<A> {
     }
 }
 
+/* TODO: consider a ZipWriter which works with just a Write bound to support streaming output? This
+ * would require some work, but is possible in the protocol. */
 impl<W: Write + Seek> ZipWriter<W> {
     /// Initializes the archive.
     ///
@@ -1441,6 +1442,7 @@ impl<W: Write + Seek> ZipWriter<W> {
     /// implementations may materialize a symlink as a regular file, possibly with the
     /// content incorrectly set to the symlink target. For maximum portability, consider
     /// storing a regular file instead.
+    /* TODO: support OsStr instead of just str, for non-unicode paths. */
     pub fn add_symlink<N: ToString, T: ToString, E: FileOptionExtension>(
         &mut self,
         name: N,
@@ -1654,7 +1656,7 @@ impl<W: Write + Seek> GenericZipWriter<W> {
                         let best_non_zopfli = Compression::best().level();
                         if level > best_non_zopfli {
                             let options = Options {
-                                iteration_count: NonZeroU64::try_from(
+                                iteration_count: core::num::NonZeroU64::try_from(
                                     (level - best_non_zopfli) as u64,
                                 )
                                 .unwrap(),
