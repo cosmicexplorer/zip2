@@ -79,7 +79,7 @@ impl CommandFormat for Compress {
         "Generate an archive from data in argument strings or read from the filesystem.";
 
     const USAGE_LINE: &'static str =
-        "[-h|--help] [OUTPUT-FLAGS] [--archive-comment <comment>] [ENTRY]... [--] [PATH]...";
+        "[-h|--help] [OUTPUT-FLAGS] [GLOBAL-FLAGS] [ENTRY]... [--] [PATH]...";
 
     fn generate_help() -> String {
         format!(
