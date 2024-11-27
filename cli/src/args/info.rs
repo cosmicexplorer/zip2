@@ -1,5 +1,5 @@
 use super::{
-    extract::{Extract, InputSpec, MatchExpression},
+    extract::{Extract, InputSpec, MatchExpression, PatSelContext},
     ArgParseError, CommandFormat,
 };
 
@@ -642,7 +642,7 @@ file-type = ''		[DEFAULT => full]
 "#,
             Extract::COMMAND_NAME,
             Extract::generate_match_expr_help_text(),
-            Extract::generate_pattern_selector_help_text(true),
+            Extract::generate_pattern_selector_help_text(PatSelContext::MatchOnly),
             Extract::INPUT_HELP_TEXT,
         )
     }

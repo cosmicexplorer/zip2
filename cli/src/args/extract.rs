@@ -47,20 +47,155 @@ impl PatternSelectorType {
         }
     }
 
-    pub const fn default_for_match() -> Self {
-        if cfg!(feature = "glob") {
-            Self::Glob
-        } else {
-            Self::Literal
+    const fn help_description(self) -> &'static str {
+        match self {
+            Self::Glob => "glob",
+            Self::Literal => "literal",
+            Self::Regexp => "regexp",
         }
     }
 
-    pub const fn default_for_replacement() -> Self {
-        if cfg!(feature = "rx") {
-            Self::Regexp
-        } else {
-            Self::Literal
+    const fn arg_abbreviation(self) -> &'static str {
+        match self {
+            Self::Glob => "glob",
+            Self::Literal => "lit",
+            Self::Regexp => "rx",
         }
+    }
+
+    fn generate_match_help_text(self) -> String {
+        format!(
+            r#"These flags default to interpreting a <pattern> argument as a {} string to
+match against the entire entry name, which can be explicitly requested as
+follows:
+
+   --match=path:{} <pattern>"#,
+            self.help_description(),
+            self.arg_abbreviation(),
+        )
+    }
+
+    pub fn generate_match_default_help_text() -> String {
+        Self::default_for_match().generate_match_help_text()
+    }
+}
+
+#[derive(Copy, Clone)]
+pub enum PatSelContext {
+    MatchOnly,
+    MatchAndTransform,
+}
+
+impl PatSelContext {
+    #[allow(dead_code)]
+    const fn first_default(self) -> &'static str {
+        match self {
+            Self::MatchOnly => "[DEFAULT] ",
+            Self::MatchAndTransform => "[DEFAULT for matching] ",
+        }
+    }
+
+    #[allow(dead_code)]
+    const fn second_default(self) -> &'static str {
+        match self {
+            Self::MatchOnly => "",
+            Self::MatchAndTransform => "[DEFAULT for replacement] ",
+        }
+    }
+}
+
+#[cfg(all(feature = "glob", feature = "rx"))]
+impl PatternSelectorType {
+    pub fn generate_pat_sel_help_section(ctx: PatSelContext) -> String {
+        format!(
+            r#"pat-sel  = glob		{}(interpret as a shell glob)
+         = lit		(interpret as literal string)
+         = rx		{}(interpret as a regular expression)
+         = <pat-sel><pat-mod...>
+                        (apply search modifiers from <pat-mod>)"#,
+            ctx.first_default(),
+            ctx.second_default(),
+        )
+    }
+}
+
+#[cfg(all(feature = "glob", not(feature = "rx")))]
+impl PatternSelectorType {
+    pub fn generate_pat_sel_help_section(ctx: PatSelContext) -> String {
+        format!(
+            r#"pat-sel  = glob		{}(interpret as a shell glob)
+         = lit		{}(interpret as literal string)
+         = <pat-sel><pat-mod...>
+                        (apply search modifiers from <pat-mod>)"#,
+            ctx.first_default(),
+            ctx.second_default(),
+        )
+    }
+}
+
+#[cfg(all(not(feature = "glob"), feature = "rx"))]
+impl PatternSelectorType {
+    pub fn generate_pat_sel_help_section(ctx: PatSelContext) -> String {
+        format!(
+            r#"pat-sel  = lit		{}(interpret as literal string)
+         = rx		{}(interpret as a regular expression)
+         = <pat-sel><pat-mod...>
+                        (apply search modifiers from <pat-mod>)"#,
+            ctx.first_default(),
+            ctx.second_default(),
+        )
+    }
+}
+
+#[cfg(not(any(feature = "glob", feature = "rx")))]
+impl PatternSelectorType {
+    pub fn generate_pat_sel_help_section(_ctx: PatSelContext) -> String {
+        r#"pat-sel  = lit		[DEFAULT] (interpret as literal string)
+         = <pat-sel><pat-mod...>
+                        (apply search modifiers from <pat-mod>)"#
+            .to_string()
+    }
+}
+
+#[cfg(feature = "glob")]
+impl PatternSelectorType {
+    pub const fn default_for_match() -> Self {
+        Self::Glob
+    }
+
+    pub const fn generate_glob_replacement_note(ctx: PatSelContext) -> &'static str {
+        match ctx {
+            PatSelContext::MatchOnly => "",
+            PatSelContext::MatchAndTransform => {
+                "\n*Note:* glob patterns are not supported for replacement, and attempting to use
+them with e.g '--transform:glob' will produce an error.\n"
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "glob"))]
+impl PatternSelectorType {
+    pub const fn default_for_match() -> Self {
+        Self::Literal
+    }
+
+    pub const fn generate_glob_replacement_note(_ctx: PatSelContext) -> &'static str {
+        ""
+    }
+}
+
+#[cfg(feature = "rx")]
+impl PatternSelectorType {
+    pub const fn default_for_replacement() -> Self {
+        Self::Regexp
+    }
+}
+
+#[cfg(not(feature = "rx"))]
+impl PatternSelectorType {
+    pub const fn default_for_replacement() -> Self {
+        Self::Literal
     }
 }
 
@@ -1151,7 +1286,7 @@ These results are dependent on the entry data:
         )
     }
 
-    pub fn generate_pattern_selector_help_text(match_only: bool) -> String {
+    pub fn generate_pattern_selector_help_text(ctx: PatSelContext) -> String {
         format!(
             r#"
 ## Selector syntax:
@@ -1160,11 +1295,7 @@ The string matching operations of {} expose an interface to
 configure various pattern matching techniques on various components of the entry
 name string.
 
-These flags default to interpreting a <pattern> argument as a glob string to
-match against the entire entry name, which can be explicitly requested as
-follows:
-
-   --match=path:glob <pattern>
+{}
 
 The entire range of search options is described below:
 
@@ -1175,13 +1306,8 @@ comp-sel = path		[DEFAULT] (match full entry)
          = ext		(match only the file extension, if available)
 
 ### Pattern selector (pat-sel):
-pat-sel  = glob		[DEFAULT{}] (interpret as a shell glob)
-         = lit		(interpret as literal string)
-         = rx		{}(interpret as a regular expression)
-         = <pat-sel><pat-mod...>	(apply search modifiers from <pat-mod>)
-
 {}
-
+{}
 Also note that glob and regex patterns require building this binary with the
 "glob" and "rx" cargo features respectively. Specifying ':glob' or ':rx' without
 the requisite feature support will produce an error. If the requisite feature is
@@ -1202,35 +1328,25 @@ contains '^' or '$' as well, no error is produced.
 *Note:* not all pattern modifiers apply everywhere. In particular, {}':p' and ':s' are
 incompatible with glob search and will produce an error.
 "#,
-            if match_only {
-                "--match"
-            } else {
-                "--match and --transform"
+            match ctx {
+                PatSelContext::MatchOnly => "--match",
+                PatSelContext::MatchAndTransform => "--match and --transform",
             },
-            if match_only { "" } else { " for matching" },
-            if match_only {
-                ""
-            } else {
-                "[DEFAULT for replacement] "
+            PatternSelectorType::generate_match_default_help_text(),
+            PatternSelectorType::generate_pat_sel_help_section(ctx),
+            PatternSelectorType::generate_glob_replacement_note(ctx),
+            match ctx {
+                PatSelContext::MatchOnly => "",
+                PatSelContext::MatchAndTransform =>
+                    "         = :g	(use multi-match behavior for string replacements)\n",
             },
-            if match_only {
-                ""
-            } else {
-                "*Note:* glob patterns are not supported for replacement, and attempting to use
-them with e.g '--transform:glob' will produce an error."
-            },
-            if match_only {
-                ""
-            } else {
-                "         = :g	(use multi-match behavior for string replacements)\n"
-            },
-            if match_only {
-                ""
-            } else {
-                "':g' only
+            match ctx {
+                PatSelContext::MatchOnly => "",
+                PatSelContext::MatchAndTransform =>
+                    "':g' only
 applies to string replacement, and using it for a match expression like
-'--match:rx:g' will produce an error. Additionally, "
-            }
+'--match:rx:g' will produce an error. Additionally, ",
+            },
         )
     }
 
@@ -1435,7 +1551,7 @@ used to filter out such entries.
 {}
 {}"#,
             Self::generate_match_expr_help_text(),
-            Self::generate_pattern_selector_help_text(false),
+            Self::generate_pattern_selector_help_text(PatSelContext::MatchAndTransform),
             Self::INPUT_HELP_TEXT,
         )
     }
