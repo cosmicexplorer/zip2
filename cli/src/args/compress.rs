@@ -46,6 +46,9 @@ pub enum OutputType {
     File { path: PathBuf, append: bool },
 }
 
+/* #[cfg(feature = "json")] */
+/* impl OutputType {} */
+
 #[derive(Debug)]
 pub struct Compress {
     pub output: OutputType,

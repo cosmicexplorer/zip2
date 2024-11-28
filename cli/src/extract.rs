@@ -49,7 +49,7 @@ fn maybe_process_symlink<'a, 't>(
     entry
         .read_to_end(symlink_target)
         .wrap_err("failed to read symlink target from zip archive entry")?;
-    debug_assert_eq!(symlink_target.len(), size.try_into().unwrap());
+    debug_assert_eq!(u64::try_from(symlink_target.len()).unwrap(), size);
     Ok(Some(symlink_target))
 }
 
