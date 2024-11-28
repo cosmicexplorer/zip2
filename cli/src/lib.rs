@@ -8,6 +8,7 @@ pub mod args;
 pub mod compress;
 pub mod extract;
 pub mod info;
+pub mod print;
 
 pub enum ErrHandle<W> {
     Output(W),
