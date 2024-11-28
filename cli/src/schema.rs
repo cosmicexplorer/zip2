@@ -1,4 +1,4 @@
-use std::{error, ffi, fmt, marker::PhantomData, str};
+use std::str;
 
 pub trait Schema {}
 
@@ -18,56 +18,62 @@ pub trait Backend {
     fn parse<'a>(s: Self::Input<'a>) -> Result<Self::Value, Self::Error>;
 }
 
-pub struct StrDecoderTransformer<B>(PhantomData<B>);
+pub mod transformers {
+    use super::Backend;
 
-impl<B> StrDecoderTransformer<B> {
-    pub const fn new() -> Self {
-        Self(PhantomData)
-    }
-}
+    use std::{error, ffi, fmt, marker::PhantomData, str};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StrWrapperError<E> {
-    Utf8(str::Utf8Error),
-    Unwrap(E),
-}
+    pub struct StrDecoderTransformer<B>(PhantomData<B>);
 
-impl<E> fmt::Display for StrWrapperError<E>
-where
-    E: fmt::Display,
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Utf8(e) => <str::Utf8Error as fmt::Display>::fmt(e, f),
-            Self::Unwrap(e) => <E as fmt::Display>::fmt(e, f),
+    impl<B> StrDecoderTransformer<B> {
+        pub const fn new() -> Self {
+            Self(PhantomData)
         }
     }
-}
 
-impl<E> error::Error for StrWrapperError<E>
-where
-    E: error::Error,
-{
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match self {
-            Self::Utf8(e) => e.source(),
-            Self::Unwrap(e) => e.source(),
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum StrWrapperError<E> {
+        Utf8(str::Utf8Error),
+        Unwrap(E),
+    }
+
+    impl<E> fmt::Display for StrWrapperError<E>
+    where
+        E: fmt::Display,
+    {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                Self::Utf8(e) => <str::Utf8Error as fmt::Display>::fmt(e, f),
+                Self::Unwrap(e) => <E as fmt::Display>::fmt(e, f),
+            }
         }
     }
-}
 
-impl<B> Backend for StrDecoderTransformer<B>
-where
-    for<'a> B: Backend<Input<'a> = &'a str>,
-{
-    type Input<'a> = &'a ffi::OsStr;
-    type Value = <B as Backend>::Value;
-    type Error = StrWrapperError<<B as Backend>::Error>;
-    fn parse<'a>(s: &'a ffi::OsStr) -> Result<Self::Value, Self::Error> {
-        let s: &'a str = s
-            .try_into()
-            .map_err(|e: str::Utf8Error| StrWrapperError::Utf8(e))?;
-        <B as Backend>::parse(s).map_err(|e| StrWrapperError::Unwrap(e))
+    impl<E> error::Error for StrWrapperError<E>
+    where
+        E: error::Error,
+    {
+        fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+            match self {
+                Self::Utf8(e) => e.source(),
+                Self::Unwrap(e) => e.source(),
+            }
+        }
+    }
+
+    impl<B> Backend for StrDecoderTransformer<B>
+    where
+        for<'a> B: Backend<Input<'a> = &'a str>,
+    {
+        type Input<'a> = &'a ffi::OsStr;
+        type Value = <B as Backend>::Value;
+        type Error = StrWrapperError<<B as Backend>::Error>;
+        fn parse<'a>(s: &'a ffi::OsStr) -> Result<Self::Value, Self::Error> {
+            let s: &'a str = s
+                .try_into()
+                .map_err(|e: str::Utf8Error| StrWrapperError::Utf8(e))?;
+            <B as Backend>::parse(s).map_err(|e| StrWrapperError::Unwrap(e))
+        }
     }
 }
 
@@ -86,6 +92,7 @@ impl Backend for JsonBackend {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::ffi;
 
     struct BoolBackend;
     impl Backend for BoolBackend {
@@ -148,6 +155,7 @@ mod test {
 
     #[test]
     fn str_wrapper() {
+        use transformers::{StrDecoderTransformer, StrWrapperError};
         type Wrapper = StrDecoderTransformer<BoolBackend>;
 
         assert!(Wrapper::parse(ffi::OsStr::new("true")).unwrap());
