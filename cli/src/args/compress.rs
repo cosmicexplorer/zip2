@@ -79,44 +79,62 @@ impl CommandFormat for Compress {
         "Generate an archive from data in argument strings or read from the filesystem.";
 
     const USAGE_LINE: &'static str =
-        "[-h|--help] [OUTPUT-FLAGS] [GLOBAL-FLAGS] [ENTRY]... [--] [PATH]...";
+        "[-h|--help] [OUTPUT-FLAGS] [GLOBAL-FLAGS] [ATTR|ENTRY-DATA]... [--] [ENTRY-PATH]...";
 
     fn generate_help() -> String {
         format!(
             r#"
   -h, --help	Print help
 
-Output flags:
-Where and how to write the generated zip archive.
+Output flags (OUTPUT-FLAGS): Where and how to write the generated zip archive.
+
+If not specified, output is written to stdout.
+
+OUTPUT-FLAGS = [--append] --output-file <file>
+             = --stdout
 
   -o, --output-file <file>
           Output zip file path to write.
+
           The output file is truncated if it already exists, unless --append is
-          provided. If not provided, output is written to stdout.
+          provided.
 
       --append
           If an output path is provided with -o, open it as an existing zip
-          archive and append to it. If the output path does not already exist,
-          no error is produced, and a new zip file is created at the given path.
+          archive and append to it.
+
+          If the output path does not already exist, no error is produced, and
+          a new zip file is created at the given path.
 
       --stdout
           Allow writing output to stdout even if stdout is a tty.
 
-Global flags:
-These flags describe information set for the entire produced archive.
+Global flags (GLOBAL-FLAGS): These flags describe information set for the entire produced archive.
+
+GLOBAL-FLAGS = --archive-comment <comment>
 
       --archive-comment <comment>
           If provided, this will set the archive's comment field to the
           specified bytes. This does not need to be valid unicode.
 
-Entries:
-After output flags are provided, the rest of the command line is
-attributes and entry data. Attributes modify later entries.
+Attributes (ATTR): Settings for entry metadata.
 
-Sticky attributes:
+Attributes may be "sticky" or "non-sticky". Sticky attributes apply to
+everything that comes after them, while non-sticky attributes only apply to the
+next entry after them.
+
+ATTR = STICKY
+     = NON-STICKY
+
+Sticky attributes (STICKY): Generic metadata.
+
 These flags apply to everything that comes after them until reset by another
-instance of the same attribute. Sticky attributes continue to apply to
-positional arguments received after processing all flags.
+instance of the same attribute.
+
+STICKY = --compression-method <method-name>
+       = --compression-level <level>
+       = --mode <mode>
+       = --large-file [true|false]
 
   -c, --compression-method <method-name>
           Which compression technique to use.
@@ -144,28 +162,39 @@ positional arguments received after processing all flags.
           Therefore, this option likely never has to be set explicitly by
           the user.
 
-Non-sticky attributes:
+Non-sticky attributes (NON-STICKY): Metadata for a single entry.
+
 These flags only apply to the next entry after them, and may not be repeated.
+
+NON-STICKY = --name <name>
+           = --symlink
 
   -n, --name <name>
           The name to apply to the entry. This must be UTF-8 encoded.
 
   -s, --symlink
           Make the next entry into a symlink entry.
+
           A symlink entry may be immediate with -i, or it may copy the target
           from an existing symlink with -f.
 
-Entry data:
-Each of these flags creates an entry in the output zip archive.
+Entry data (ENTRY-DATA): Create an entry in the output zip archive.
+
+ENTRY-DATA = --dir
+           = --immediate <data>
+           = --file <path>
+           = --recursive-dir <dir>
 
   -d, --dir
           Create a directory entry.
           A name must be provided beforehand with -n.
 
   -i, --immediate <data>
-          Write an entry containing the data in the argument, which need not be
-          UTF-8 encoded but will exit early upon encountering any null bytes.
-          A name must be provided beforehand with -n.
+          Write an entry containing the data in the argument
+
+          This data need not be UTF-8 encoded, but will exit early upon
+          encountering any null bytes. A name must be provided beforehand with
+          -n.
 
   -f, --file <path>
           Write an entry with the contents of this file path.
@@ -194,9 +223,17 @@ Each of these flags creates an entry in the output zip archive.
           corresponding to the symlink path (unless overridden with -n).
           Providing a symlink path which points to a file will produce an error.
 
-Positional entries:
-  [PATH]...
+Positional entries (ENTRY-PATH): Paths which are converted into entries.
+
+Any sticky attributes will continue to apply to entries specified via path,
+while any non-sticky attributes not matched to an explicit ENTRY-DATA will produce
+an error.
+
+ENTRY-PATH = <path>
+
+  <path>
           Write the file or recursive directory contents, relativizing the path.
+
           If the given path points to a file, then a single file entry will
           be written.
           If the given path is a symlink, then a single symlink entry will
