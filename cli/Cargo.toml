@@ -26,6 +26,7 @@ name = "zip-cli"
 [dependencies]
 glob = { version = "0.3", optional = true }
 regex = { version = "1", optional = true }
+json = { version = "0.12", optional = true }
 
 [dependencies.zip]
 path = ".."
@@ -48,6 +49,7 @@ zstd = ["zip/zstd"]
 
 glob = ["dep:glob"]
 rx = ["dep:regex"]
+json = ["dep:json"]
 
 default = [
     "aes-crypto",
@@ -60,6 +62,7 @@ default = [
     "zstd",
     "glob",
     "rx",
+    "json",
 ]
 
 

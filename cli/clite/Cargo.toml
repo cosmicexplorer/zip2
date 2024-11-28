@@ -21,12 +21,19 @@ members = ["."]
 [[bin]]
 name = "zip-clite"
 
-[dependencies]
-
 [dependencies.zip-cli]
 path = ".."
 default-features = false
-features = ["deflate-flate2", "deflate-zlib"]
+features = [
+    "deflate-flate2",
+    "deflate-zlib",
+]
+
+[features]
+# These are all pure rust crates with no significant dependency tree.
+rust-deps = ["zip-cli/glob", "zip-cli/rx", "zip-cli/json"]
+
+default = []
 
 [profile.release]
 strip = true
