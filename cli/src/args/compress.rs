@@ -147,7 +147,9 @@ STICKY = --compression-method <method-name>
 {}{}{}
   -l, --compression-level <level>
           How much compression to perform, from 0..=24.
+
           The accepted range of values differs for each technique.
+          TODO: how much???
 
   -m, --mode <mode>
           Unix permissions to apply to the file, in octal (like chmod).
