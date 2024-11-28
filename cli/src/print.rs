@@ -13,12 +13,14 @@ pub mod printer {
     #[derive(Debug, Clone)]
     struct PrintContext {
         prefix: String,
+        value_column: Option<usize>,
     }
 
     impl PrintContext {
         pub const fn new() -> Self {
             Self {
                 prefix: String::new(),
+                value_column: None,
             }
         }
     }
@@ -44,16 +46,4 @@ pub enum HelpVerbosity {
     NameOnly,
     NameAndDescription,
     CompleteWithCaveats,
-}
-
-pub struct FlagsSection {}
-
-pub enum FlagKind {
-    Boolean,
-    Choice(Vec<String>),
-}
-
-pub struct Flag {
-    pub short: Option<char>,
-    pub long: &'static str,
 }
