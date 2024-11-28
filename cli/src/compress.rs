@@ -1,8 +1,9 @@
 use std::{
+    ffi::OsString,
     fs,
     io::{self, Cursor, IsTerminal, Seek, Write},
     mem,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use zip::{
@@ -12,6 +13,176 @@ use zip::{
 };
 
 use crate::{args::compress::*, CommandError, OutputHandle, WrapCommandErr};
+
+pub enum EntryData {
+    Dir {
+        name: String,
+    },
+    Immediate {
+        name: String,
+        data: OsString,
+        symlink_flag: bool,
+    },
+    File {
+        name: Option<String>,
+        path: PathBuf,
+        symlink_flag: bool,
+    },
+    RecDir {
+        name: Option<String>,
+        path: PathBuf,
+    },
+}
+
+impl EntryData {
+    pub fn interpret_entry_path(path: PathBuf) -> Result<Self, CommandError> {
+        let file_type = fs::symlink_metadata(&path)
+            .wrap_err_with(|| format!("failed to read metadata from path {}", path.display()))?
+            .file_type();
+        Ok(if file_type.is_dir() {
+            Self::RecDir { name: None, path }
+        } else {
+            Self::File {
+                name: None,
+                path,
+                symlink_flag: file_type.is_symlink(),
+            }
+        })
+    }
+
+    pub fn create_entry(
+        self,
+        writer: &mut ZipWriter<impl Write + Seek>,
+        options: SimpleFileOptions,
+        mut err: impl Write,
+    ) -> Result<(), CommandError> {
+        match self {
+            Self::Dir { name } => writer
+                .add_directory(&name, options)
+                .wrap_err_with(|| format!("failed to create dir entry {name}")),
+            Self::Immediate {
+                name,
+                data,
+                symlink_flag,
+            } => {
+                if data.len() > ZIP64_BYTES_THR.try_into().unwrap() {
+                    return Err(CommandError::InvalidArg(format!(
+                        "length of immediate data argument is {}; use a file for inputs over {} bytes",
+                        data.len(),
+                        ZIP64_BYTES_THR
+                    )));
+                };
+                if symlink_flag {
+                    /* This is a symlink entry. */
+                    let target = data.into_string().map_err(|target| {
+                        CommandError::InvalidArg(format!(
+                            "failed to decode immediate symlink target {target:?}"
+                        ))
+                    })?;
+                    writeln!(
+                        err,
+                        "writing immediate symlink entry with name {name:?} and target {target:?}"
+                    )
+                    .unwrap();
+                    /* TODO: .add_symlink() should support OsString targets! */
+                    writer
+                        .add_symlink(&name, &target, options)
+                        .wrap_err_with(|| {
+                            format!("failed to created symlink entry {name}->{target}")
+                        })
+                } else {
+                    /* This is a file entry. */
+                    writeln!(
+                        err,
+                        "writing immediate file entry with name {name:?} and data {data:?}"
+                    )
+                    .unwrap();
+                    let data = data.into_encoded_bytes();
+                    writer
+                        .start_file(&name, options)
+                        .wrap_err_with(|| format!("failed to create file entry {name}"))?;
+                    writer.write_all(data.as_ref()).wrap_err_with(|| {
+                        format!(
+                            "failed writing immediate data of length {} to file entry {name}",
+                            data.len()
+                        )
+                    })
+                }
+            }
+            Self::File {
+                name,
+                path,
+                symlink_flag,
+            } => {
+                let name = name.unwrap_or_else(|| path_to_string(&path).into());
+                if symlink_flag {
+                    /* This is a symlink entry. */
+                    let target: String =
+                        path_to_string(fs::read_link(&path).wrap_err_with(|| {
+                            format!("failed to read symlink from path {}", path.display())
+                        })?)
+                        .into();
+                    /* Similarly to immediate data arguments, we're simply not going to support
+                     * symlinks over this length, which should be impossible anyway. */
+                    if target.len() > ZIP64_BYTES_THR.try_into().unwrap() {
+                        return Err(CommandError::InvalidArg(format!(
+                            "symlink target for {name} is over {ZIP64_BYTES_THR} bytes (was: {})",
+                            target.len()
+                        )));
+                    }
+                    writeln!(err, "writing symlink entry from path {path:?} with name {name:?} and target {target:?}").unwrap();
+                    writer
+                        .add_symlink(&name, &target, options)
+                        .wrap_err_with(|| {
+                            format!("failed to create symlink entry for {name}->{target}")
+                        })
+                } else {
+                    /* This is a file entry. */
+                    writeln!(
+                        err,
+                        "writing file entry from path {path:?} with name {name:?}"
+                    )
+                    .unwrap();
+                    let mut f = fs::File::open(&path).wrap_err_with(|| {
+                        format!("error opening file for {name} at {}", path.display())
+                    })?;
+                    /* Get the length of the file before reading it and set large_file if needed. */
+                    let input_len: u64 = f
+                        .metadata()
+                        .wrap_err_with(|| format!("error reading file metadata for {f:?}"))?
+                        .len();
+                    writeln!(err, "entry is {input_len} bytes long").unwrap();
+                    let maybe_large_file_options = if input_len > ZIP64_BYTES_THR {
+                        writeln!(
+                            err,
+                            "temporarily ensuring .large_file(true) for current entry"
+                        )
+                        .unwrap();
+                        options.large_file(true)
+                    } else {
+                        options
+                    };
+                    writer
+                        .start_file(&name, maybe_large_file_options)
+                        .wrap_err_with(|| format!("error creating file entry for {name}"))?;
+                    io::copy(&mut f, writer)
+                        .wrap_err_with(|| {
+                            format!("error copying content for {name} from file {f:?}")
+                        })
+                        .map(|_| ())
+                }
+            }
+            Self::RecDir { name, path } => {
+                writeln!(
+                    err,
+                    "writing recursive dir entries for path {path:?} with name {name:?}"
+                )
+                .unwrap();
+                enter_recursive_dir_entries(&mut err, name, &path, writer, options)
+            }
+        }
+    }
+}
 
 fn enter_recursive_dir_entries(
     err: &mut impl Write,

@@ -1,6 +1,10 @@
-pub trait Schema {
-    /* parse_argv()? */
-    /* json()? */
+use std::{collections::VecDeque, ffi::OsString, fmt};
+
+pub trait Schema: Sized + fmt::Debug {
+    type E;
+    fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::E>;
+    type J: From<Self::E>;
+    fn from_json() -> Result<Self, Self::J>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
