@@ -1,27 +1,99 @@
-use std::str;
+pub mod backends {
+    use std::io;
 
-pub trait Schema {}
+    pub trait Backend {
+        type Input<'a>;
+        type Value;
+        type Error;
+        fn parse<'a>(s: Self::Input<'a>) -> Result<Self::Value, Self::Error>;
 
-/* pub enum SchemaValue { */
-/*     Bool(bool), */
-/*     Path(PathBuf), */
-/* } */
+        fn write(v: &Self::Value, w: impl io::Write) -> io::Result<()>;
+    }
 
-/* pub trait SchemaValue<B: Backend> {} */
+    #[cfg(feature = "json")]
+    pub mod json_backend {
+        use std::io;
 
-/* impl SchemaValue for bool {} */
+        pub struct JsonBackend;
 
-pub trait Backend {
-    type Input<'a>;
-    type Value;
-    type Error;
-    fn parse<'a>(s: Self::Input<'a>) -> Result<Self::Value, Self::Error>;
+        impl super::Backend for JsonBackend {
+            type Input<'a> = &'a str;
+
+            type Value = json::JsonValue;
+
+            type Error = json::Error;
+
+            fn parse<'a>(s: &'a str) -> Result<json::JsonValue, json::Error> {
+                json::parse(s)
+            }
+
+            fn write(v: &json::JsonValue, mut w: impl io::Write) -> io::Result<()> {
+                v.write(&mut w)
+            }
+        }
+    }
+}
+
+pub mod values {
+    use super::backends::Backend;
+
+    pub trait SchemaValue<B: Backend>: Sized {
+        type SerErr;
+        type DeserErr;
+        fn serialize(self) -> Result<<B as Backend>::Value, Self::SerErr>;
+        fn deserialize(s: <B as Backend>::Value) -> Result<Self, Self::DeserErr>;
+    }
+
+    #[cfg(feature = "json")]
+    pub mod json_value {
+        use super::*;
+        use crate::schema::backends::json_backend::JsonBackend;
+
+        impl SchemaValue<JsonBackend> for bool {
+            type SerErr = ();
+            type DeserErr = String;
+
+            fn serialize(self) -> Result<json::JsonValue, ()> {
+                Ok(json::JsonValue::Boolean(self))
+            }
+            fn deserialize(s: json::JsonValue) -> Result<Self, String> {
+                match s {
+                    json::JsonValue::Boolean(value) => Ok(value),
+                    s => Err(format!("non-boolean value {s}")),
+                }
+            }
+        }
+
+        impl SchemaValue<JsonBackend> for String {
+            type SerErr = ();
+            type DeserErr = String;
+
+            fn serialize(self) -> Result<json::JsonValue, ()> {
+                Ok(json::JsonValue::String(self))
+            }
+            fn deserialize(s: json::JsonValue) -> Result<Self, String> {
+                match s {
+                    json::JsonValue::String(value) => Ok(value),
+                    s => Err(format!("non-string value {s}")),
+                }
+            }
+        }
+    }
+
+    /* pub enum SchemaValue { */
+    /*     Bool(bool), */
+    /*     Path(PathBuf), */
+    /* } */
+
+    /* pub trait SchemaValue<B: Backend> {} */
+
+    /* impl SchemaValue for bool {} */
 }
 
 pub mod transformers {
-    use super::Backend;
+    use super::backends::Backend;
 
-    use std::{error, ffi, fmt, marker::PhantomData, str};
+    use std::{error, ffi, fmt, io, marker::PhantomData, str};
 
     pub trait Transformer {
         type A<'a>;
@@ -88,31 +160,24 @@ pub mod transformers {
     {
         type Input<'a> = <T as Transformer>::A<'a>;
         type Value = <B as Backend>::Value;
+
         type Error = WrapperError<<T as Transformer>::Error, <B as Backend>::Error>;
         fn parse<'a>(s: Self::Input<'a>) -> Result<Self::Value, Self::Error> {
             let s: <T as Transformer>::B<'a> =
                 <T as Transformer>::convert_input(s).map_err(|e| WrapperError::In(e))?;
             <B as Backend>::parse(s).map_err(|e| WrapperError::Out(e))
         }
-    }
-}
 
-pub struct JsonBackend;
-
-#[cfg(feature = "json")]
-impl Backend for JsonBackend {
-    type Input<'a> = &'a str;
-    type Value = json::JsonValue;
-    type Error = json::Error;
-    fn parse<'a>(s: &'a str) -> Result<Self::Value, Self::Error> {
-        json::parse(s)
+        fn write(v: &<B as Backend>::Value, w: impl io::Write) -> io::Result<()> {
+            <B as Backend>::write(v, w)
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use std::ffi;
+    use super::{backends::Backend, *};
+    use std::{ffi, io};
 
     struct BoolBackend;
     impl Backend for BoolBackend {
@@ -124,6 +189,12 @@ mod test {
                 "true" => Ok(true),
                 "false" => Ok(false),
                 e => Err(e.to_string()),
+            }
+        }
+        fn write(v: &bool, mut w: impl io::Write) -> io::Result<()> {
+            match v {
+                true => w.write_all(b"true"),
+                false => w.write_all(b"false"),
             }
         }
     }
@@ -175,6 +246,7 @@ mod test {
 
     #[test]
     fn str_wrapper() {
+        use std::str;
         use transformers::{DecoderTransformer, StrTransformer, WrapperError};
         type Wrapper = DecoderTransformer<StrTransformer, BoolBackend>;
 
