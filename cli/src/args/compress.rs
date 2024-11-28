@@ -135,7 +135,7 @@ instance of the same attribute.
 STICKY = --compression-method <method-name>
        = --compression-level <level>
        = --mode <mode>
-       = --large-file [true|false]
+       = --large-file <bool> # [true|false]
 
   -c, --compression-method <method-name>
           Which compression technique to use.
@@ -152,7 +152,7 @@ STICKY = --compression-method <method-name>
   -m, --mode <mode>
           Unix permissions to apply to the file, in octal (like chmod).
 
-      --large-file [true|false]
+      --large-file <bool> # [true|false]
           Whether to enable large file support.
           This may take up more space for records, but allows files over 32 bits
           in length to be written, up to 64 bit sizes.
