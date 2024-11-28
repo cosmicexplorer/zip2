@@ -14,6 +14,7 @@ use zip::{
 
 use crate::{args::compress::*, CommandError, OutputHandle, WrapCommandErr};
 
+#[derive(Debug, Clone)]
 pub enum EntryData {
     Dir {
         name: String,
@@ -181,6 +182,203 @@ impl EntryData {
                 enter_recursive_dir_entries(&mut err, name, &path, writer, options)
             }
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ModificationOperation {
+    CreateEntry {
+        options: SimpleFileOptions,
+        spec: EntryData,
+    },
+}
+
+impl ModificationOperation {
+    pub fn invoke(
+        self,
+        writer: &mut ZipWriter<impl Write + Seek>,
+        err: impl Write,
+    ) -> Result<(), CommandError> {
+        match self {
+            Self::CreateEntry { options, spec } => spec.create_entry(writer, options, err),
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ModificationSequence {
+    pub operations: Vec<ModificationOperation>,
+}
+
+impl ModificationSequence {
+    fn initial_options() -> SimpleFileOptions {
+        SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Deflated)
+            .large_file(false)
+    }
+
+    pub fn from_args(
+        args: Vec<CompressionArg>,
+        positional_paths: Vec<PathBuf>,
+        mut err: impl Write,
+    ) -> Result<Self, CommandError> {
+        let mut operations: Vec<ModificationOperation> = Vec::new();
+
+        let mut options = Self::initial_options();
+
+        let mut last_name: Option<String> = None;
+        let mut symlink_flag: bool = false;
+
+        for arg in args.into_iter() {
+            match arg {
+                /* attributes: */
+                CompressionArg::CompressionMethod(method) => {
+                    let method = match method {
+                        CompressionMethodArg::Stored => CompressionMethod::Stored,
+                        CompressionMethodArg::Deflate => CompressionMethod::Deflated,
+                        #[cfg(feature = "deflate64")]
+                        CompressionMethodArg::Deflate64 => CompressionMethod::Deflate64,
+                        #[cfg(feature = "bzip2")]
+                        CompressionMethodArg::Bzip2 => CompressionMethod::Bzip2,
+                        #[cfg(feature = "zstd")]
+                        CompressionMethodArg::Zstd => CompressionMethod::Zstd,
+                    };
+                    writeln!(err, "setting compression method {method:?}").unwrap();
+                    options = options.compression_method(method);
+                }
+                CompressionArg::Level(CompressionLevel(level)) => {
+                    writeln!(err, "setting compression level {level:?}").unwrap();
+                    options = options.compression_level(Some(level));
+                }
+                CompressionArg::UnixPermissions(UnixPermissions(mode)) => {
+                    writeln!(err, "setting file mode {mode:#o}").unwrap();
+                    options = options.unix_permissions(mode);
+                }
+                CompressionArg::LargeFile(large_file) => {
+                    writeln!(err, "setting large file flag to {large_file:?}").unwrap();
+                    options = options.large_file(large_file);
+                }
+                CompressionArg::Name(name) => {
+                    writeln!(err, "setting name of next entry to {name:?}").unwrap();
+                    if let Some(last_name) = last_name {
+                        return Err(CommandError::InvalidArg(format!(
+                            "got two names before an entry: {last_name} and {name}"
+                        )));
+                    }
+                    last_name = Some(name);
+                }
+                CompressionArg::Symlink => {
+                    writeln!(err, "setting symlink flag for next entry").unwrap();
+                    if symlink_flag {
+                        /* TODO: make this a warning? */
+                        return Err(CommandError::InvalidArg(
+                            "symlink flag provided twice before entry".to_string(),
+                        ));
+                    }
+                    symlink_flag = true;
+                }
+
+                /* new operations: */
+                CompressionArg::Dir => {
+                    let last_name = last_name.take();
+                    let symlink_flag = mem::replace(&mut symlink_flag, false);
+
+                    writeln!(err, "writing dir entry").unwrap();
+                    if symlink_flag {
+                        return Err(CommandError::InvalidArg(
+                            "symlink flag provided before dir entry".to_string(),
+                        ));
+                    }
+                    let name = last_name.ok_or_else(|| {
+                        CommandError::InvalidArg("no name provided before dir entry".to_string())
+                    })?;
+                    operations.push(ModificationOperation::CreateEntry {
+                        options,
+                        spec: EntryData::Dir { name },
+                    });
+                }
+                CompressionArg::Immediate(data) => {
+                    let last_name = last_name.take();
+                    let symlink_flag = mem::replace(&mut symlink_flag, false);
+
+                    let name = last_name.ok_or_else(|| {
+                        CommandError::InvalidArg(format!(
+                            "no name provided for immediate data {data:?}"
+                        ))
+                    })?;
+                    operations.push(ModificationOperation::CreateEntry {
+                        options,
+                        spec: EntryData::Immediate {
+                            name,
+                            data,
+                            symlink_flag,
+                        },
+                    });
+                }
+                CompressionArg::FilePath(path) => {
+                    let last_name = last_name.take();
+                    let symlink_flag = mem::replace(&mut symlink_flag, false);
+
+                    let name = last_name.unwrap_or_else(|| path_to_string(&path).into());
+                    operations.push(ModificationOperation::CreateEntry {
+                        options,
+                        spec: EntryData::File {
+                            name: Some(name),
+                            path,
+                            symlink_flag,
+                        },
+                    });
+                }
+                CompressionArg::RecursiveDirPath(path) => {
+                    let last_name = last_name.take();
+                    let symlink_flag = mem::replace(&mut symlink_flag, false);
+
+                    if symlink_flag {
+                        return Err(CommandError::InvalidArg(
+                            "symlink flag provided before recursive dir entry".to_string(),
+                        ));
+                    }
+
+                    operations.push(ModificationOperation::CreateEntry {
+                        options,
+                        spec: EntryData::RecDir {
+                            name: last_name,
+                            path,
+                        },
+                    });
+                }
+            }
+        }
+        if symlink_flag {
+            return Err(CommandError::InvalidArg(
+                "symlink flag remaining after all entry flags processed".to_string(),
+            ));
+        }
+        if let Some(last_name) = last_name {
+            return Err(CommandError::InvalidArg(format!(
+                "name {last_name} remaining after all entry flags processed"
+            )));
+        }
+
+        for p in positional_paths.into_iter() {
+            operations.push(ModificationOperation::CreateEntry {
+                options,
+                spec: EntryData::interpret_entry_path(p)?,
+            });
+        }
+        Ok(Self { operations })
+    }
+
+    pub fn invoke(
+        self,
+        writer: &mut ZipWriter<impl Write + Seek>,
+        mut err: impl Write,
+    ) -> Result<(), CommandError> {
+        let Self { operations } = self;
+        for op in operations.into_iter() {
+            op.invoke(writer, &mut err)?;
+        }
+        Ok(())
     }
 }
 
@@ -381,271 +579,8 @@ pub fn execute_compress(mut err: impl Write, args: Compress) -> Result<(), Comma
         writer.set_raw_comment(comment.into());
     }
 
-    let mut options = SimpleFileOptions::default()
-        .compression_method(CompressionMethod::Deflated)
-        .large_file(false);
-    writeln!(err, "default zip entry options: {options:?}").unwrap();
-    let mut last_name: Option<String> = None;
-    let mut symlink_flag: bool = false;
-
-    for arg in args.into_iter() {
-        match arg {
-            CompressionArg::CompressionMethod(method) => {
-                let method = match method {
-                    CompressionMethodArg::Stored => CompressionMethod::Stored,
-                    CompressionMethodArg::Deflate => CompressionMethod::Deflated,
-                    #[cfg(feature = "deflate64")]
-                    CompressionMethodArg::Deflate64 => CompressionMethod::Deflate64,
-                    #[cfg(feature = "bzip2")]
-                    CompressionMethodArg::Bzip2 => CompressionMethod::Bzip2,
-                    #[cfg(feature = "zstd")]
-                    CompressionMethodArg::Zstd => CompressionMethod::Zstd,
-                };
-                writeln!(err, "setting compression method {method:?}").unwrap();
-                options = options.compression_method(method);
-            }
-            CompressionArg::Level(CompressionLevel(level)) => {
-                writeln!(err, "setting compression level {level:?}").unwrap();
-                options = options.compression_level(Some(level));
-            }
-            CompressionArg::UnixPermissions(UnixPermissions(mode)) => {
-                writeln!(err, "setting file mode {mode:#o}").unwrap();
-                options = options.unix_permissions(mode);
-            }
-            CompressionArg::LargeFile(large_file) => {
-                writeln!(err, "setting large file flag to {large_file:?}").unwrap();
-                options = options.large_file(large_file);
-            }
-            CompressionArg::Name(name) => {
-                writeln!(err, "setting name of next entry to {name:?}").unwrap();
-                if let Some(last_name) = last_name {
-                    return Err(CommandError::InvalidArg(format!(
-                        "got two names before an entry: {last_name} and {name}"
-                    )));
-                }
-                last_name = Some(name);
-            }
-            CompressionArg::Dir => {
-                writeln!(err, "writing dir entry").unwrap();
-                if symlink_flag {
-                    return Err(CommandError::InvalidArg(
-                        "symlink flag provided before dir entry".to_string(),
-                    ));
-                }
-                let dirname = last_name.take().ok_or_else(|| {
-                    CommandError::InvalidArg("no name provided before dir entry".to_string())
-                })?;
-                writer
-                    .add_directory(&dirname, options)
-                    .wrap_err_with(|| format!("failed to create dir entry {dirname}"))?;
-            }
-            CompressionArg::Symlink => {
-                writeln!(err, "setting symlink flag for next entry").unwrap();
-                if symlink_flag {
-                    /* TODO: make this a warning? */
-                    return Err(CommandError::InvalidArg(
-                        "symlink flag provided twice before entry".to_string(),
-                    ));
-                }
-                symlink_flag = true;
-            }
-            CompressionArg::Immediate(data) => {
-                let name = last_name.take().ok_or_else(|| {
-                    CommandError::InvalidArg(format!(
-                        "no name provided for immediate data {data:?}"
-                    ))
-                })?;
-                /* It's highly unlikely any OS allows process args of this length, so even though
-                 * we're using rust's env::args_os() and it would be very impressive for an attacker
-                 * to get CLI args to overflow, it seems likely to be inefficient in any case, and
-                 * very unlikely to be useful, so exit with a clear error. */
-                if data.len() > ZIP64_BYTES_THR.try_into().unwrap() {
-                    return Err(CommandError::InvalidArg(format!(
-                        "length of immediate data argument is {}; use a file for inputs over {} bytes",
-                        data.len(),
-                        ZIP64_BYTES_THR
-                    )));
-                };
-                if symlink_flag {
-                    /* This is a symlink entry. */
-                    let target = data.into_string().map_err(|target| {
-                        CommandError::InvalidArg(format!(
-                            "failed to decode immediate symlink target {target:?}"
-                        ))
-                    })?;
-                    writeln!(
-                        err,
-                        "writing immediate symlink entry with name {name:?} and target {target:?}"
-                    )
-                    .unwrap();
-                    /* TODO: .add_symlink() should support OsString targets! */
-                    writer
-                        .add_symlink(&name, &target, options)
-                        .wrap_err_with(|| {
-                            format!("failed to created symlink entry {name}->{target}")
-                        })?;
-                    symlink_flag = false;
-                } else {
-                    /* This is a file entry. */
-                    writeln!(
-                        err,
-                        "writing immediate file entry with name {name:?} and data {data:?}"
-                    )
-                    .unwrap();
-                    let data = data.into_encoded_bytes();
-                    writer
-                        .start_file(&name, options)
-                        .wrap_err_with(|| format!("failed to create file entry {name}"))?;
-                    writer.write_all(data.as_ref()).wrap_err_with(|| {
-                        format!(
-                            "failed writing immediate data of length {} to file entry {name}",
-                            data.len()
-                        )
-                    })?;
-                }
-            }
-            CompressionArg::FilePath(path) => {
-                let name = last_name
-                    .take()
-                    .unwrap_or_else(|| path_to_string(&path).into());
-                if symlink_flag {
-                    /* This is a symlink entry. */
-                    let target: String =
-                        path_to_string(fs::read_link(&path).wrap_err_with(|| {
-                            format!("failed to read symlink from path {}", path.display())
-                        })?)
-                        .into();
-                    /* Similarly to immediate data arguments, we're simply not going to support
-                     * symlinks over this length, which should be impossible anyway. */
-                    if target.len() > ZIP64_BYTES_THR.try_into().unwrap() {
-                        return Err(CommandError::InvalidArg(format!(
-                            "symlink target for {name} is over {ZIP64_BYTES_THR} bytes (was: {})",
-                            target.len()
-                        )));
-                    }
-                    writeln!(err, "writing symlink entry from path {path:?} with name {name:?} and target {target:?}").unwrap();
-                    writer
-                        .add_symlink(&name, &target, options)
-                        .wrap_err_with(|| {
-                            format!("failed to create symlink entry for {name}->{target}")
-                        })?;
-                    symlink_flag = false;
-                } else {
-                    /* This is a file entry. */
-                    writeln!(
-                        err,
-                        "writing file entry from path {path:?} with name {name:?}"
-                    )
-                    .unwrap();
-                    let mut f = fs::File::open(&path).wrap_err_with(|| {
-                        format!("error opening file for {name} at {}", path.display())
-                    })?;
-                    /* Get the length of the file before reading it and set large_file if needed. */
-                    let input_len: u64 = f
-                        .metadata()
-                        .wrap_err_with(|| format!("error reading file metadata for {f:?}"))?
-                        .len();
-                    writeln!(err, "entry is {input_len} bytes long").unwrap();
-                    let maybe_large_file_options = if input_len > ZIP64_BYTES_THR {
-                        writeln!(
-                            err,
-                            "temporarily ensuring .large_file(true) for current entry"
-                        )
-                        .unwrap();
-                        options.large_file(true)
-                    } else {
-                        options
-                    };
-                    writer
-                        .start_file(&name, maybe_large_file_options)
-                        .wrap_err_with(|| format!("error creating file entry for {name}"))?;
-                    io::copy(&mut f, &mut writer).wrap_err_with(|| {
-                        format!("error copying content for {name} from file {f:?}")
-                    })?;
-                }
-            }
-            CompressionArg::RecursiveDirPath(r) => {
-                if symlink_flag {
-                    return Err(CommandError::InvalidArg(
-                        "symlink flag provided before recursive dir entry".to_string(),
-                    ));
-                }
-                writeln!(
-                    err,
-                    "writing recursive dir entries for path {r:?} with name {last_name:?}"
-                )
-                .unwrap();
-                enter_recursive_dir_entries(&mut err, last_name.take(), &r, &mut writer, options)?;
-            }
-        }
-    }
-    if symlink_flag {
-        return Err(CommandError::InvalidArg(
-            "symlink flag remaining after all entry flags processed".to_string(),
-        ));
-    }
-    if let Some(last_name) = last_name {
-        return Err(CommandError::InvalidArg(format!(
-            "name {last_name} remaining after all entry flags processed"
-        )));
-    }
-
-    for pos_arg in positional_paths.into_iter() {
-        let file_type = fs::symlink_metadata(&pos_arg)
-            .wrap_err_with(|| format!("failed to read metadata from path {}", pos_arg.display()))?
-            .file_type();
-        if file_type.is_symlink() {
-            let target = fs::read_link(&pos_arg).wrap_err_with(|| {
-                format!("failed to read symlink content from {}", pos_arg.display())
-            })?;
-            writeln!(
-                err,
-                "writing positional symlink entry with path {pos_arg:?} and target {target:?}"
-            )
-            .unwrap();
-            writer
-                .add_symlink_from_path(&pos_arg, &target, options)
-                .wrap_err_with(|| {
-                    format!(
-                        "failed to create symlink entry for {}->{}",
-                        pos_arg.display(),
-                        target.display()
-                    )
-                })?;
-        } else if file_type.is_file() {
-            writeln!(err, "writing positional file entry with path {pos_arg:?}").unwrap();
-            let mut f = fs::File::open(&pos_arg)
-                .wrap_err_with(|| format!("failed to open file at {}", pos_arg.display()))?;
-            /* Get the length of the file before reading it and set large_file if needed. */
-            let input_len: u64 = f
-                .metadata()
-                .wrap_err_with(|| format!("error reading file metadata for {f:?}"))?
-                .len();
-            let maybe_large_file_options = if input_len > ZIP64_BYTES_THR {
-                writeln!(
-                    err,
-                    "temporarily ensuring .large_file(true) for current entry"
-                )
-                .unwrap();
-                options.large_file(true)
-            } else {
-                options
-            };
-            writer
-                .start_file_from_path(&pos_arg, maybe_large_file_options)
-                .wrap_err_with(|| format!("failed to create file entry {}", pos_arg.display()))?;
-            io::copy(&mut f, &mut writer)
-                .wrap_err_with(|| format!("failed to copy file contents from {f:?}"))?;
-        } else {
-            assert!(file_type.is_dir());
-            writeln!(
-                err,
-                "writing positional recursive dir entry for {pos_arg:?}"
-            )
-            .unwrap();
-            enter_recursive_dir_entries(&mut err, None, &pos_arg, &mut writer, options)?;
-        }
-    }
+    let mod_seq = ModificationSequence::from_args(args, positional_paths, &mut err)?;
+    mod_seq.invoke(&mut writer, &mut err)?;
 
     let handle = writer
         .finish()
