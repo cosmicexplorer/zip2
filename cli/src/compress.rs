@@ -15,7 +15,7 @@ use zip::{
 use crate::{args::compress::*, CommandError, OutputHandle, WrapCommandErr};
 
 #[derive(Debug, Clone)]
-pub enum EntryData {
+enum EntrySpec {
     Dir {
         name: String,
     },
@@ -35,7 +35,7 @@ pub enum EntryData {
     },
 }
 
-impl EntryData {
+impl EntrySpec {
     pub fn interpret_entry_path(path: PathBuf) -> Result<Self, CommandError> {
         let file_type = fs::symlink_metadata(&path)
             .wrap_err_with(|| format!("failed to read metadata from path {}", path.display()))?
@@ -189,7 +189,7 @@ impl EntryData {
 pub enum ModificationOperation {
     CreateEntry {
         options: SimpleFileOptions,
-        spec: EntryData,
+        spec: EntrySpec,
     },
 }
 
@@ -294,7 +294,7 @@ impl ModificationSequence {
                     })?;
                     operations.push(ModificationOperation::CreateEntry {
                         options,
-                        spec: EntryData::Dir { name },
+                        spec: EntrySpec::Dir { name },
                     });
                 }
                 CompressionArg::Immediate(data) => {
@@ -308,7 +308,7 @@ impl ModificationSequence {
                     })?;
                     operations.push(ModificationOperation::CreateEntry {
                         options,
-                        spec: EntryData::Immediate {
+                        spec: EntrySpec::Immediate {
                             name,
                             data,
                             symlink_flag,
@@ -322,7 +322,7 @@ impl ModificationSequence {
                     let name = last_name.unwrap_or_else(|| path_to_string(&path).into());
                     operations.push(ModificationOperation::CreateEntry {
                         options,
-                        spec: EntryData::File {
+                        spec: EntrySpec::File {
                             name: Some(name),
                             path,
                             symlink_flag,
@@ -341,7 +341,7 @@ impl ModificationSequence {
 
                     operations.push(ModificationOperation::CreateEntry {
                         options,
-                        spec: EntryData::RecDir {
+                        spec: EntrySpec::RecDir {
                             name: last_name,
                             path,
                         },
@@ -363,7 +363,7 @@ impl ModificationSequence {
         for p in positional_paths.into_iter() {
             operations.push(ModificationOperation::CreateEntry {
                 options,
-                spec: EntryData::interpret_entry_path(p)?,
+                spec: EntrySpec::interpret_entry_path(p)?,
             });
         }
         Ok(Self { operations })
