@@ -23,56 +23,76 @@ pub mod transformers {
 
     use std::{error, ffi, fmt, marker::PhantomData, str};
 
-    pub struct StrDecoderTransformer<B>(PhantomData<B>);
+    pub trait Transformer {
+        type A<'a>;
+        type B<'a>;
+        type Error;
+        fn convert_input<'a>(s: Self::A<'a>) -> Result<Self::B<'a>, Self::Error>;
+    }
 
-    impl<B> StrDecoderTransformer<B> {
+    pub struct StrTransformer;
+
+    impl Transformer for StrTransformer {
+        type A<'a> = &'a ffi::OsStr;
+        type B<'a> = &'a str;
+        type Error = str::Utf8Error;
+        fn convert_input<'a>(s: Self::A<'a>) -> Result<Self::B<'a>, Self::Error> {
+            s.try_into()
+        }
+    }
+
+    pub struct DecoderTransformer<T, B>(PhantomData<(T, B)>);
+
+    impl<T, B> DecoderTransformer<T, B> {
         pub const fn new() -> Self {
             Self(PhantomData)
         }
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum StrWrapperError<E> {
-        Utf8(str::Utf8Error),
-        Unwrap(E),
+    pub enum WrapperError<In, Out> {
+        In(In),
+        Out(Out),
     }
 
-    impl<E> fmt::Display for StrWrapperError<E>
+    impl<In, Out> fmt::Display for WrapperError<In, Out>
     where
-        E: fmt::Display,
+        In: fmt::Display,
+        Out: fmt::Display,
     {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             match self {
-                Self::Utf8(e) => <str::Utf8Error as fmt::Display>::fmt(e, f),
-                Self::Unwrap(e) => <E as fmt::Display>::fmt(e, f),
+                Self::In(e) => e.fmt(f),
+                Self::Out(e) => e.fmt(f),
             }
         }
     }
 
-    impl<E> error::Error for StrWrapperError<E>
+    impl<In, Out> error::Error for WrapperError<In, Out>
     where
-        E: error::Error,
+        In: error::Error,
+        Out: error::Error,
     {
         fn source(&self) -> Option<&(dyn error::Error + 'static)> {
             match self {
-                Self::Utf8(e) => e.source(),
-                Self::Unwrap(e) => e.source(),
+                Self::In(e) => e.source(),
+                Self::Out(e) => e.source(),
             }
         }
     }
 
-    impl<B> Backend for StrDecoderTransformer<B>
+    impl<T, B> Backend for DecoderTransformer<T, B>
     where
-        for<'a> B: Backend<Input<'a> = &'a str>,
+        T: Transformer,
+        for<'a> B: Backend<Input<'a> = <T as Transformer>::B<'a>>,
     {
-        type Input<'a> = &'a ffi::OsStr;
+        type Input<'a> = <T as Transformer>::A<'a>;
         type Value = <B as Backend>::Value;
-        type Error = StrWrapperError<<B as Backend>::Error>;
-        fn parse<'a>(s: &'a ffi::OsStr) -> Result<Self::Value, Self::Error> {
-            let s: &'a str = s
-                .try_into()
-                .map_err(|e: str::Utf8Error| StrWrapperError::Utf8(e))?;
-            <B as Backend>::parse(s).map_err(|e| StrWrapperError::Unwrap(e))
+        type Error = WrapperError<<T as Transformer>::Error, <B as Backend>::Error>;
+        fn parse<'a>(s: Self::Input<'a>) -> Result<Self::Value, Self::Error> {
+            let s: <T as Transformer>::B<'a> =
+                <T as Transformer>::convert_input(s).map_err(|e| WrapperError::In(e))?;
+            <B as Backend>::parse(s).map_err(|e| WrapperError::Out(e))
         }
     }
 }
@@ -138,7 +158,7 @@ mod test {
             ffi::OsString::from_wide(&[0x0066, 0x006f, 0xD800, 0x006f])
         }
     }
-    fn broken_utf8() -> ffi::OsString {
+    fn broken_utf8() -> std::ffi::OsString {
         #[cfg(unix)]
         let broken = unix::broken_utf8().to_os_string();
         #[cfg(windows)]
@@ -155,24 +175,24 @@ mod test {
 
     #[test]
     fn str_wrapper() {
-        use transformers::{StrDecoderTransformer, StrWrapperError};
-        type Wrapper = StrDecoderTransformer<BoolBackend>;
+        use transformers::{DecoderTransformer, StrTransformer, WrapperError};
+        type Wrapper = DecoderTransformer<StrTransformer, BoolBackend>;
 
         assert!(Wrapper::parse(ffi::OsStr::new("true")).unwrap());
         assert!(!Wrapper::parse(ffi::OsStr::new("false")).unwrap());
         assert_eq!(
             Wrapper::parse(ffi::OsStr::new("")).err().unwrap(),
-            StrWrapperError::Unwrap(String::from(""))
+            WrapperError::Out(String::from(""))
         );
         assert_eq!(
             Wrapper::parse(ffi::OsStr::new("aaaaasdf")).err().unwrap(),
-            StrWrapperError::Unwrap(String::from("aaaaasdf"))
+            WrapperError::Out(String::from("aaaaasdf"))
         );
 
         let broken = broken_utf8();
         assert_eq!(
             Wrapper::parse(broken.as_ref()).err().unwrap(),
-            StrWrapperError::Utf8(str::from_utf8(broken.as_encoded_bytes()).err().unwrap()),
+            WrapperError::In(str::from_utf8(broken.as_encoded_bytes()).err().unwrap()),
         );
     }
 }
