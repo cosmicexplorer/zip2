@@ -1,4 +1,4 @@
-use super::{ArgParseError, CommandFormat, CommandInputs, Resource};
+use super::{ArgParseError, CommandFormat};
 
 use std::{collections::VecDeque, ffi::OsString, num::ParseIntError, path::PathBuf};
 
@@ -46,90 +46,7 @@ pub enum OutputType {
     File { path: PathBuf, append: bool },
 }
 
-pub enum OutputTypeError {
-    ArgWith(&'static str, String),
-    ArgTwice(&'static str),
-    NoValFor(&'static str),
-    ValArgTwice {
-        arg: &'static str,
-        prev: String,
-        new: String,
-    },
-}
-
-impl Resource for OutputType {
-    const ID: &'static str = "OUTPUT-FLAGS";
-    type ParseError = OutputTypeError;
-    fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ParseError> {
-        let mut allow_stdout: bool = false;
-        let mut append_to_output_path: bool = false;
-        let mut output_path: Option<PathBuf> = None;
-
-        while let Some(arg) = argv.pop_front() {
-            match arg.as_encoded_bytes() {
-                b"--stdout" => {
-                    if let Some(output_path) = output_path.take() {
-                        return Err(OutputTypeError::ArgWith(
-                            "--stdout",
-                            format!("output file {output_path:?}"),
-                        ));
-                    }
-                    if append_to_output_path {
-                        return Err(OutputTypeError::ArgWith("--stdout", "--append".to_string()));
-                    }
-                    if allow_stdout {
-                        return Err(OutputTypeError::ArgTwice("--stdout"));
-                    }
-                    allow_stdout = true;
-                }
-                b"--append" => {
-                    if append_to_output_path {
-                        return Err(OutputTypeError::ArgTwice("--append"));
-                    }
-                    if allow_stdout {
-                        return Err(OutputTypeError::ArgWith("--append", "--stdout".to_string()));
-                    }
-                    append_to_output_path = true;
-                }
-                b"-o" | b"--output-file" => {
-                    let new_path = argv
-                        .pop_front()
-                        .map(PathBuf::from)
-                        .ok_or_else(|| OutputTypeError::NoValFor("-o/--output-file"))?;
-                    if let Some(prev_path) = output_path.take() {
-                        return Err(OutputTypeError::ValArgTwice {
-                            arg: "-o/--output-file",
-                            prev: format!("{prev_path:?}"),
-                            new: format!("{new_path:?}"),
-                        });
-                    }
-                    if allow_stdout {
-                        return Err(OutputTypeError::ArgWith(
-                            "--stdout",
-                            "-o/--output-file".to_string(),
-                        ));
-                    }
-                    output_path = Some(new_path);
-                }
-                _ => {
-                    argv.push_front(arg);
-                    break;
-                }
-            }
-        }
-
-        Ok(if let Some(output_path) = output_path {
-            Self::File {
-                path: output_path,
-                append: append_to_output_path,
-            }
-        } else {
-            Self::Stdout {
-                allow_tty: allow_stdout,
-            }
-        })
-    }
-}
+pub mod resource;
 
 #[derive(Debug)]
 pub struct Compress {
@@ -139,7 +56,7 @@ pub struct Compress {
     pub positional_paths: Vec<PathBuf>,
 }
 
-impl CommandInputs for Compress {}
+/* impl CommandInputs for Compress {} */
 
 impl Compress {
     #[cfg(feature = "deflate64")]
