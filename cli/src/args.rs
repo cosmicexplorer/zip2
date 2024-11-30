@@ -151,13 +151,38 @@ pub enum ZipCommand {
     Extract(extract::Extract),
 }
 
-pub trait Resource: Sized {
-    const ID: &'static str;
-    type ParseError;
-    fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ParseError>;
-}
+pub mod resource {
+    use super::*;
 
-pub trait CommandInputs {}
+    use crate::schema::{backends::Backend, transformers::WrapperError};
+
+    pub trait Resource {
+        const ID: &'static str;
+    }
+
+    pub trait ArgvResource: Resource + Sized {
+        type ArgvParseError;
+        fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError>;
+    }
+
+    pub trait SchemaResource: Resource + Sized {
+        type B: Backend;
+        type SchemaParseError;
+        fn parse_schema<'a>(
+            v: <Self::B as Backend>::Val<'a>,
+        ) -> Result<Self, Self::SchemaParseError>;
+
+        fn parse_schema_str<'a>(
+            s: <Self::B as Backend>::Str<'a>,
+        ) -> Result<Self, WrapperError<<Self::B as Backend>::Err<'a>, Self::SchemaParseError>>
+        {
+            let v = <Self::B as Backend>::parse(s).map_err(|e| WrapperError::In(e))?;
+            Ok(Self::parse_schema(v).map_err(|e| WrapperError::Out(e))?)
+        }
+    }
+
+    pub trait CommandInputs {}
+}
 
 pub trait CommandFormat: fmt::Debug {
     const COMMAND_NAME: &'static str;
