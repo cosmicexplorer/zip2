@@ -1,94 +1,32 @@
 pub mod backends {
-    use std::io;
-
     pub trait Backend {
-        type Input<'a>;
-        type Value;
-        type Error;
-        fn parse<'a>(s: Self::Input<'a>) -> Result<Self::Value, Self::Error>;
-
-        fn write(v: &Self::Value, w: impl io::Write) -> io::Result<()>;
+        type Str<'a>;
+        type Val<'a>;
+        type Err<'a>;
+        fn parse<'a>(s: Self::Str<'a>) -> Result<Self::Val<'a>, Self::Err<'a>>;
+        /* fn print(v: Self::Val) -> Self::Str; */
     }
 
     #[cfg(feature = "json")]
     pub mod json_backend {
-        use std::io;
-
         pub struct JsonBackend;
 
         impl super::Backend for JsonBackend {
-            type Input<'a> = &'a str;
+            type Str<'a> = &'a str;
+            type Val<'a> = json::JsonValue;
+            type Err<'a> = json::Error;
 
-            type Value = json::JsonValue;
-
-            type Error = json::Error;
-
-            fn parse<'a>(s: &'a str) -> Result<json::JsonValue, json::Error> {
+            fn parse<'a>(s: Self::Str<'a>) -> Result<Self::Val<'a>, Self::Err<'a>> {
                 json::parse(s)
             }
-
-            fn write(v: &json::JsonValue, mut w: impl io::Write) -> io::Result<()> {
-                v.write(&mut w)
-            }
+            /* fn print(v: json::JsonValue) -> String { */
+            /*     v.pretty(2) */
+            /* } */
         }
     }
 }
 
-pub mod values {
-    use super::backends::Backend;
-
-    pub trait SchemaValue<B: Backend>: Sized {
-        type SerErr;
-        type DeserErr;
-        fn serialize(self) -> Result<<B as Backend>::Value, Self::SerErr>;
-        fn deserialize(s: <B as Backend>::Value) -> Result<Self, Self::DeserErr>;
-    }
-
-    #[cfg(feature = "json")]
-    pub mod json_value {
-        use super::*;
-        use crate::schema::backends::json_backend::JsonBackend;
-
-        impl SchemaValue<JsonBackend> for bool {
-            type SerErr = ();
-            type DeserErr = String;
-
-            fn serialize(self) -> Result<json::JsonValue, ()> {
-                Ok(json::JsonValue::Boolean(self))
-            }
-            fn deserialize(s: json::JsonValue) -> Result<Self, String> {
-                match s {
-                    json::JsonValue::Boolean(value) => Ok(value),
-                    s => Err(format!("non-boolean value {s}")),
-                }
-            }
-        }
-
-        impl SchemaValue<JsonBackend> for String {
-            type SerErr = ();
-            type DeserErr = String;
-
-            fn serialize(self) -> Result<json::JsonValue, ()> {
-                Ok(json::JsonValue::String(self))
-            }
-            fn deserialize(s: json::JsonValue) -> Result<Self, String> {
-                match s {
-                    json::JsonValue::String(value) => Ok(value),
-                    s => Err(format!("non-string value {s}")),
-                }
-            }
-        }
-    }
-
-    /* pub enum SchemaValue { */
-    /*     Bool(bool), */
-    /*     Path(PathBuf), */
-    /* } */
-
-    /* pub trait SchemaValue<B: Backend> {} */
-
-    /* impl SchemaValue for bool {} */
-}
+pub mod values;
 
 pub mod transformers {
     use super::backends::Backend;
@@ -98,8 +36,8 @@ pub mod transformers {
     pub trait Transformer {
         type A<'a>;
         type B<'a>;
-        type Error;
-        fn convert_input<'a>(s: Self::A<'a>) -> Result<Self::B<'a>, Self::Error>;
+        type Error<'a>;
+        fn convert_input<'a>(s: Self::A<'a>) -> Result<Self::B<'a>, Self::Error<'a>>;
     }
 
     pub struct StrTransformer;
@@ -107,8 +45,8 @@ pub mod transformers {
     impl Transformer for StrTransformer {
         type A<'a> = &'a ffi::OsStr;
         type B<'a> = &'a str;
-        type Error = str::Utf8Error;
-        fn convert_input<'a>(s: Self::A<'a>) -> Result<Self::B<'a>, Self::Error> {
+        type Error<'a> = str::Utf8Error;
+        fn convert_input<'a>(s: Self::A<'a>) -> Result<Self::B<'a>, Self::Error<'a>> {
             s.try_into()
         }
     }
@@ -156,21 +94,21 @@ pub mod transformers {
     impl<T, B> Backend for DecoderTransformer<T, B>
     where
         T: Transformer,
-        for<'a> B: Backend<Input<'a> = <T as Transformer>::B<'a>>,
+        for<'a> B: Backend<Str<'a> = <T as Transformer>::B<'a>>,
     {
-        type Input<'a> = <T as Transformer>::A<'a>;
-        type Value = <B as Backend>::Value;
+        type Str<'a> = <T as Transformer>::A<'a>;
+        type Val<'a> = <B as Backend>::Val<'a>;
 
-        type Error = WrapperError<<T as Transformer>::Error, <B as Backend>::Error>;
-        fn parse<'a>(s: Self::Input<'a>) -> Result<Self::Value, Self::Error> {
+        type Err<'a> = WrapperError<<T as Transformer>::Error<'a>, <B as Backend>::Err<'a>>;
+        fn parse<'a>(s: Self::Str<'a>) -> Result<Self::Val<'a>, Self::Err<'a>> {
             let s: <T as Transformer>::B<'a> =
                 <T as Transformer>::convert_input(s).map_err(|e| WrapperError::In(e))?;
             <B as Backend>::parse(s).map_err(|e| WrapperError::Out(e))
         }
 
-        fn write(v: &<B as Backend>::Value, w: impl io::Write) -> io::Result<()> {
-            <B as Backend>::write(v, w)
-        }
+        /* fn write(v: &<B as Backend>::Value, w: impl io::Write) -> io::Result<()> { */
+        /*     <B as Backend>::write(v, w) */
+        /* } */
     }
 }
 
@@ -181,22 +119,22 @@ mod test {
 
     struct BoolBackend;
     impl Backend for BoolBackend {
-        type Input<'a> = &'a str;
-        type Value = bool;
-        type Error = String;
-        fn parse<'a>(s: &'a str) -> Result<bool, String> {
+        type Str<'a> = &'a str;
+        type Val<'a> = bool;
+        type Err<'a> = &'a str;
+        fn parse<'a>(s: Self::Str<'a>) -> Result<Self::Val<'a>, Self::Err<'a>> {
             match s {
                 "true" => Ok(true),
                 "false" => Ok(false),
-                e => Err(e.to_string()),
+                e => Err(e),
             }
         }
-        fn write(v: &bool, mut w: impl io::Write) -> io::Result<()> {
-            match v {
-                true => w.write_all(b"true"),
-                false => w.write_all(b"false"),
-            }
-        }
+        /* fn write(v: &bool, mut w: impl io::Write) -> io::Result<()> { */
+        /*     match v { */
+        /*         true => w.write_all(b"true"), */
+        /*         false => w.write_all(b"false"), */
+        /*     } */
+        /* } */
     }
 
     #[test]
@@ -254,11 +192,11 @@ mod test {
         assert!(!Wrapper::parse(ffi::OsStr::new("false")).unwrap());
         assert_eq!(
             Wrapper::parse(ffi::OsStr::new("")).err().unwrap(),
-            WrapperError::Out(String::from(""))
+            WrapperError::Out("")
         );
         assert_eq!(
             Wrapper::parse(ffi::OsStr::new("aaaaasdf")).err().unwrap(),
-            WrapperError::Out(String::from("aaaaasdf"))
+            WrapperError::Out("aaaaasdf")
         );
 
         let broken = broken_utf8();
