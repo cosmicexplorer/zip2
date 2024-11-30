@@ -151,6 +151,14 @@ pub enum ZipCommand {
     Extract(extract::Extract),
 }
 
+pub trait Resource: Sized {
+    const ID: &'static str;
+    type ParseError;
+    fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ParseError>;
+}
+
+pub trait CommandInputs {}
+
 pub trait CommandFormat: fmt::Debug {
     const COMMAND_NAME: &'static str;
     const COMMAND_TABS: &'static str;
