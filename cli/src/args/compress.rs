@@ -1,6 +1,10 @@
 use super::{ArgParseError, CommandFormat};
 
+use zip::{write::SimpleFileOptions, CompressionMethod};
+
 use std::{collections::VecDeque, ffi::OsString, num::ParseIntError, path::PathBuf};
+
+pub mod resource;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CompressionMethodArg {
@@ -52,8 +56,6 @@ impl Default for OutputType {
     }
 }
 
-pub mod resource;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GlobalFlags {
     pub archive_comment: Option<OsString>,
@@ -65,6 +67,40 @@ impl Default for GlobalFlags {
             archive_comment: None,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum EntrySpec {
+    Dir {
+        name: String,
+    },
+    Immediate {
+        name: String,
+        data: OsString,
+        symlink_flag: bool,
+    },
+    File {
+        name: Option<String>,
+        path: PathBuf,
+        symlink_flag: bool,
+    },
+    RecDir {
+        name: Option<String>,
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum ModificationOperation {
+    CreateEntry {
+        options: SimpleFileOptions,
+        spec: EntrySpec,
+    },
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ModificationSequence {
+    pub operations: Vec<ModificationOperation>,
 }
 
 #[derive(Debug)]

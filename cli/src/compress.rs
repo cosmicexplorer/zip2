@@ -14,43 +14,7 @@ use zip::{
 
 use crate::{args::compress::*, CommandError, OutputHandle, WrapCommandErr};
 
-#[derive(Debug, Clone)]
-enum EntrySpec {
-    Dir {
-        name: String,
-    },
-    Immediate {
-        name: String,
-        data: OsString,
-        symlink_flag: bool,
-    },
-    File {
-        name: Option<String>,
-        path: PathBuf,
-        symlink_flag: bool,
-    },
-    RecDir {
-        name: Option<String>,
-        path: PathBuf,
-    },
-}
-
 impl EntrySpec {
-    pub fn interpret_entry_path(path: PathBuf) -> Result<Self, CommandError> {
-        let file_type = fs::symlink_metadata(&path)
-            .wrap_err_with(|| format!("failed to read metadata from path {}", path.display()))?
-            .file_type();
-        Ok(if file_type.is_dir() {
-            Self::RecDir { name: None, path }
-        } else {
-            Self::File {
-                name: None,
-                path,
-                symlink_flag: file_type.is_symlink(),
-            }
-        })
-    }
-
     pub fn create_entry(
         self,
         writer: &mut ZipWriter<impl Write + Seek>,
@@ -185,14 +149,6 @@ impl EntrySpec {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ModificationOperation {
-    CreateEntry {
-        options: SimpleFileOptions,
-        spec: EntrySpec,
-    },
-}
-
 impl ModificationOperation {
     pub fn invoke(
         self,
@@ -205,170 +161,7 @@ impl ModificationOperation {
     }
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct ModificationSequence {
-    pub operations: Vec<ModificationOperation>,
-}
-
 impl ModificationSequence {
-    fn initial_options() -> SimpleFileOptions {
-        SimpleFileOptions::default()
-            .compression_method(CompressionMethod::Deflated)
-            .large_file(false)
-    }
-
-    pub fn from_args(
-        args: Vec<CompressionArg>,
-        positional_paths: Vec<PathBuf>,
-        mut err: impl Write,
-    ) -> Result<Self, CommandError> {
-        let mut operations: Vec<ModificationOperation> = Vec::new();
-
-        let mut options = Self::initial_options();
-
-        let mut last_name: Option<String> = None;
-        let mut symlink_flag: bool = false;
-
-        for arg in args.into_iter() {
-            match arg {
-                /* attributes: */
-                CompressionArg::CompressionMethod(method) => {
-                    let method = match method {
-                        CompressionMethodArg::Stored => CompressionMethod::Stored,
-                        CompressionMethodArg::Deflate => CompressionMethod::Deflated,
-                        #[cfg(feature = "deflate64")]
-                        CompressionMethodArg::Deflate64 => CompressionMethod::Deflate64,
-                        #[cfg(feature = "bzip2")]
-                        CompressionMethodArg::Bzip2 => CompressionMethod::Bzip2,
-                        #[cfg(feature = "zstd")]
-                        CompressionMethodArg::Zstd => CompressionMethod::Zstd,
-                    };
-                    writeln!(err, "setting compression method {method:?}").unwrap();
-                    options = options.compression_method(method);
-                }
-                CompressionArg::Level(CompressionLevel(level)) => {
-                    writeln!(err, "setting compression level {level:?}").unwrap();
-                    options = options.compression_level(Some(level));
-                }
-                CompressionArg::UnixPermissions(UnixPermissions(mode)) => {
-                    writeln!(err, "setting file mode {mode:#o}").unwrap();
-                    options = options.unix_permissions(mode);
-                }
-                CompressionArg::LargeFile(large_file) => {
-                    writeln!(err, "setting large file flag to {large_file:?}").unwrap();
-                    options = options.large_file(large_file);
-                }
-                CompressionArg::Name(name) => {
-                    writeln!(err, "setting name of next entry to {name:?}").unwrap();
-                    if let Some(last_name) = last_name {
-                        return Err(CommandError::InvalidArg(format!(
-                            "got two names before an entry: {last_name} and {name}"
-                        )));
-                    }
-                    last_name = Some(name);
-                }
-                CompressionArg::Symlink => {
-                    writeln!(err, "setting symlink flag for next entry").unwrap();
-                    if symlink_flag {
-                        /* TODO: make this a warning? */
-                        return Err(CommandError::InvalidArg(
-                            "symlink flag provided twice before entry".to_string(),
-                        ));
-                    }
-                    symlink_flag = true;
-                }
-
-                /* new operations: */
-                CompressionArg::Dir => {
-                    let last_name = last_name.take();
-                    let symlink_flag = mem::replace(&mut symlink_flag, false);
-
-                    writeln!(err, "writing dir entry").unwrap();
-                    if symlink_flag {
-                        return Err(CommandError::InvalidArg(
-                            "symlink flag provided before dir entry".to_string(),
-                        ));
-                    }
-                    let name = last_name.ok_or_else(|| {
-                        CommandError::InvalidArg("no name provided before dir entry".to_string())
-                    })?;
-                    operations.push(ModificationOperation::CreateEntry {
-                        options,
-                        spec: EntrySpec::Dir { name },
-                    });
-                }
-                CompressionArg::Immediate(data) => {
-                    let last_name = last_name.take();
-                    let symlink_flag = mem::replace(&mut symlink_flag, false);
-
-                    let name = last_name.ok_or_else(|| {
-                        CommandError::InvalidArg(format!(
-                            "no name provided for immediate data {data:?}"
-                        ))
-                    })?;
-                    operations.push(ModificationOperation::CreateEntry {
-                        options,
-                        spec: EntrySpec::Immediate {
-                            name,
-                            data,
-                            symlink_flag,
-                        },
-                    });
-                }
-                CompressionArg::FilePath(path) => {
-                    let last_name = last_name.take();
-                    let symlink_flag = mem::replace(&mut symlink_flag, false);
-
-                    let name = last_name.unwrap_or_else(|| path_to_string(&path).into());
-                    operations.push(ModificationOperation::CreateEntry {
-                        options,
-                        spec: EntrySpec::File {
-                            name: Some(name),
-                            path,
-                            symlink_flag,
-                        },
-                    });
-                }
-                CompressionArg::RecursiveDirPath(path) => {
-                    let last_name = last_name.take();
-                    let symlink_flag = mem::replace(&mut symlink_flag, false);
-
-                    if symlink_flag {
-                        return Err(CommandError::InvalidArg(
-                            "symlink flag provided before recursive dir entry".to_string(),
-                        ));
-                    }
-
-                    operations.push(ModificationOperation::CreateEntry {
-                        options,
-                        spec: EntrySpec::RecDir {
-                            name: last_name,
-                            path,
-                        },
-                    });
-                }
-            }
-        }
-        if symlink_flag {
-            return Err(CommandError::InvalidArg(
-                "symlink flag remaining after all entry flags processed".to_string(),
-            ));
-        }
-        if let Some(last_name) = last_name {
-            return Err(CommandError::InvalidArg(format!(
-                "name {last_name} remaining after all entry flags processed"
-            )));
-        }
-
-        for p in positional_paths.into_iter() {
-            operations.push(ModificationOperation::CreateEntry {
-                options,
-                spec: EntrySpec::interpret_entry_path(p)?,
-            });
-        }
-        Ok(Self { operations })
-    }
-
     pub fn invoke(
         self,
         writer: &mut ZipWriter<impl Write + Seek>,

@@ -3,6 +3,7 @@ use std::{collections::VecDeque, ffi::OsString, fmt, sync::OnceLock};
 #[derive(Debug)]
 pub enum ArgParseError {
     StdoutMessage(String),
+    /* FIXME: give these errors much more structure!! */
     StderrMessage(String),
 }
 
@@ -172,6 +173,8 @@ pub mod resource {
         }
     }
 
+    pub trait PositionalArgvResource: ArgvResource {}
+
     pub trait SchemaResource: Resource + Sized {
         type B: Backend;
         type SchemaParseError;
@@ -183,12 +186,14 @@ pub mod resource {
             s: <Self::B as Backend>::Str<'a>,
         ) -> Result<Self, WrapperError<<Self::B as Backend>::Err<'a>, Self::SchemaParseError>>
         {
-            let v = <Self::B as Backend>::parse(s).map_err(|e| WrapperError::In(e))?;
-            Ok(Self::parse_schema(v).map_err(|e| WrapperError::Out(e))?)
+            let v = <Self::B as Backend>::parse(s).map_err(WrapperError::In)?;
+            Ok(Self::parse_schema(v).map_err(WrapperError::Out)?)
         }
     }
 
-    pub trait CommandInputs {}
+    pub trait CommandSpec {
+        /* fn resources() -> Vec<>; */
+    }
 }
 
 pub trait CommandFormat: fmt::Debug {

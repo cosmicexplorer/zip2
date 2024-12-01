@@ -1,4 +1,4 @@
-use super::{GlobalFlags, OutputType};
+use super::*;
 use crate::args::resource::*;
 
 impl Resource for OutputType {
@@ -9,10 +9,14 @@ impl Resource for GlobalFlags {
     const ID: &'static str = "GLOBAL-FLAGS";
 }
 
+impl Resource for ModificationSequence {
+    const ID: &'static str = "MOD-SEQ";
+}
+
 pub mod argv {
-    use super::{GlobalFlags, OutputType};
-    use crate::args::resource::ArgvResource;
-    use std::{collections::VecDeque, ffi::OsString, path::PathBuf};
+    use super::*;
+
+    use std::{collections::VecDeque, ffi::OsString, fmt, path::PathBuf};
 
     #[derive(Debug)]
     pub enum OutputTypeError {
@@ -143,6 +147,391 @@ pub mod argv {
             }
 
             Ok(Self { archive_comment })
+        }
+    }
+
+    pub mod compression_args {
+        use super::*;
+        use crate::{schema::transformers::WrapperError, CommandError, WrapCommandErr};
+
+        use zip::{unstable::path_to_string, write::SimpleFileOptions, CompressionMethod};
+
+        use std::mem;
+
+        #[derive(Debug)]
+        pub enum ModificationSequenceError {
+            NoValFor(&'static str),
+            Unrecognized {
+                context: &'static str,
+                value: String,
+            },
+            ValidationFailed {
+                codec: &'static str,
+                context: &'static str,
+                value: String,
+            },
+        }
+
+        struct CompressionArgs {
+            pub args: Vec<CompressionArg>,
+            pub positional_paths: Vec<PathBuf>,
+        }
+
+        impl CompressionArgs {
+            fn initial_options() -> SimpleFileOptions {
+                SimpleFileOptions::default()
+                    .compression_method(CompressionMethod::Deflated)
+                    .large_file(false)
+            }
+
+            fn parse_compression_method(
+                name: OsString,
+            ) -> Result<CompressionArg, ModificationSequenceError> {
+                Ok(match name.as_encoded_bytes() {
+                    b"stored" => CompressionArg::CompressionMethod(CompressionMethodArg::Stored),
+                    b"deflate" => CompressionArg::CompressionMethod(CompressionMethodArg::Deflate),
+                    #[cfg(feature = "deflate64")]
+                    b"deflate64" => {
+                        CompressionArg::CompressionMethod(CompressionMethodArg::Deflate64)
+                    }
+                    #[cfg(feature = "bzip2")]
+                    b"bzip2" => CompressionArg::CompressionMethod(CompressionMethodArg::Bzip2),
+                    #[cfg(feature = "zstd")]
+                    b"zstd" => CompressionArg::CompressionMethod(CompressionMethodArg::Zstd),
+                    _ => {
+                        return Err(ModificationSequenceError::Unrecognized {
+                            context: "compression method",
+                            value: format!("{name:?}"),
+                        })
+                    }
+                })
+            }
+
+            fn parse_unicode(
+                context: &'static str,
+                arg: OsString,
+            ) -> Result<String, ModificationSequenceError> {
+                arg.into_string()
+                    .map_err(|arg| ModificationSequenceError::ValidationFailed {
+                        codec: "invalid unicode",
+                        context,
+                        value: format!("{arg:?}"),
+                    })
+            }
+
+            fn parse_i64(
+                context: &'static str,
+                arg: String,
+            ) -> Result<i64, ModificationSequenceError> {
+                arg.parse::<i64>()
+                    .map_err(|e| ModificationSequenceError::ValidationFailed {
+                        codec: "failed to parse integer",
+                        context,
+                        value: format!("{e}"),
+                    })
+            }
+
+            fn parse_compression_level(
+                level: OsString,
+            ) -> Result<CompressionArg, ModificationSequenceError> {
+                let level = Self::parse_unicode("compression level", level)?;
+                let level = Self::parse_i64("compression level", level)?;
+                if (0..=24).contains(&level) {
+                    Ok(CompressionArg::Level(CompressionLevel(level)))
+                } else {
+                    Err(ModificationSequenceError::ValidationFailed {
+                        codec: "integer was not between 0 and 24",
+                        context: "compression level",
+                        value: format!("{level}"),
+                    })
+                }
+            }
+
+            fn parse_mode(mode: OsString) -> Result<CompressionArg, ModificationSequenceError> {
+                let mode = Self::parse_unicode("mode", mode)?;
+                let mode = UnixPermissions::parse(&mode).map_err(|e| {
+                    ModificationSequenceError::ValidationFailed {
+                        codec: "failed to parse octal integer",
+                        context: "compression mode",
+                        value: format!("{e}"),
+                    }
+                })?;
+                Ok(CompressionArg::UnixPermissions(mode))
+            }
+
+            fn parse_large_file(
+                large_file: OsString,
+            ) -> Result<CompressionArg, ModificationSequenceError> {
+                Ok(match large_file.as_encoded_bytes() {
+                    b"true" => CompressionArg::LargeFile(true),
+                    b"false" => CompressionArg::LargeFile(false),
+                    _ => {
+                        return Err(ModificationSequenceError::Unrecognized {
+                            context: "value for --large-file",
+                            value: format!("{large_file:?}"),
+                        })
+                    }
+                })
+            }
+
+            pub fn parse_argv(
+                argv: &mut VecDeque<OsString>,
+            ) -> Result<Self, ModificationSequenceError> {
+                let mut args: Vec<CompressionArg> = Vec::new();
+                let mut positional_paths: Vec<PathBuf> = Vec::new();
+
+                while let Some(arg) = argv.pop_front() {
+                    let arg = match arg.as_encoded_bytes() {
+                        /* Attributes */
+                        b"-c" | b"--compression-method" => match argv.pop_front() {
+                            None => Err(ModificationSequenceError::NoValFor(
+                                "-c/--compression-method",
+                            )),
+                            Some(name) => Self::parse_compression_method(name),
+                        },
+                        b"-l" | b"--compression-level" => match argv.pop_front() {
+                            None => Err(ModificationSequenceError::NoValFor(
+                                "-l/--compression-level",
+                            )),
+                            Some(level) => Self::parse_compression_level(level),
+                        },
+                        b"-m" | b"--mode" => match argv.pop_front() {
+                            None => Err(ModificationSequenceError::NoValFor("-m/--mode")),
+                            Some(mode) => Self::parse_mode(mode),
+                        },
+                        b"--large-file" => match argv.pop_front() {
+                            None => Err(ModificationSequenceError::NoValFor("--large-file")),
+                            Some(large_file) => Self::parse_large_file(large_file),
+                        },
+
+                        /* Data */
+                        b"-n" | b"--name" => match argv.pop_front() {
+                            None => Err(ModificationSequenceError::NoValFor("-n/--name")),
+                            Some(name) => {
+                                Self::parse_unicode("name", name).map(CompressionArg::Name)
+                            }
+                        },
+                        b"-s" | b"--symlink" => Ok(CompressionArg::Symlink),
+                        b"-d" | b"--dir" => Ok(CompressionArg::Dir),
+                        b"-i" | b"--immediate" => match argv.pop_front() {
+                            None => Err(ModificationSequenceError::NoValFor("-i/--immediate")),
+                            Some(data) => Ok(CompressionArg::Immediate(data)),
+                        },
+                        b"-f" | b"--file" => match argv.pop_front() {
+                            None => Err(ModificationSequenceError::NoValFor("-f/--file")),
+                            Some(file) => Ok(CompressionArg::FilePath(file.into())),
+                        },
+                        b"-r" | b"--recursive-dir" => match argv.pop_front() {
+                            None => Err(ModificationSequenceError::NoValFor("-r/--recursive-dir")),
+                            Some(dir) => Ok(CompressionArg::RecursiveDirPath(dir.into())),
+                        },
+
+                        /* Transition to positional args */
+                        b"--" => break,
+                        arg_bytes => {
+                            if arg_bytes.starts_with(b"-") {
+                                Err(ModificationSequenceError::Unrecognized {
+                                    context: "flag",
+                                    value: format!("{arg:?}"),
+                                })
+                            } else {
+                                argv.push_front(arg);
+                                break;
+                            }
+                        }
+                    }?;
+                    args.push(arg);
+                }
+
+                positional_paths.extend(mem::take(argv).into_iter().map(PathBuf::from));
+
+                Ok(Self {
+                    args,
+                    positional_paths,
+                })
+            }
+
+            fn interpret_entry_path(path: PathBuf) -> Result<EntrySpec, CommandError> {
+                let file_type = std::fs::symlink_metadata(&path)
+                    .wrap_err_with(|| format!("failed to read metadata from path {path:?}"))?
+                    .file_type();
+                Ok(if file_type.is_dir() {
+                    EntrySpec::RecDir { name: None, path }
+                } else {
+                    EntrySpec::File {
+                        name: None,
+                        path,
+                        symlink_flag: file_type.is_symlink(),
+                    }
+                })
+            }
+
+            pub fn build_mod_seq(
+                self,
+                /* mut err: impl Write, */
+            ) -> Result<ModificationSequence, CommandError> {
+                let Self {
+                    args,
+                    positional_paths,
+                } = self;
+
+                let mut operations: Vec<ModificationOperation> = Vec::new();
+
+                let mut options = Self::initial_options();
+
+                let mut last_name: Option<String> = None;
+                let mut symlink_flag: bool = false;
+
+                for arg in args.into_iter() {
+                    match arg {
+                        /* attributes: */
+                        CompressionArg::CompressionMethod(method) => {
+                            let method = match method {
+                                CompressionMethodArg::Stored => CompressionMethod::Stored,
+                                CompressionMethodArg::Deflate => CompressionMethod::Deflated,
+                                #[cfg(feature = "deflate64")]
+                                CompressionMethodArg::Deflate64 => CompressionMethod::Deflate64,
+                                #[cfg(feature = "bzip2")]
+                                CompressionMethodArg::Bzip2 => CompressionMethod::Bzip2,
+                                #[cfg(feature = "zstd")]
+                                CompressionMethodArg::Zstd => CompressionMethod::Zstd,
+                            };
+                            /* writeln!(err, "setting compression method {method:?}").unwrap(); */
+                            options = options.compression_method(method);
+                        }
+                        CompressionArg::Level(CompressionLevel(level)) => {
+                            /* writeln!(err, "setting compression level {level:?}").unwrap(); */
+                            options = options.compression_level(Some(level));
+                        }
+                        CompressionArg::UnixPermissions(UnixPermissions(mode)) => {
+                            /* writeln!(err, "setting file mode {mode:#o}").unwrap(); */
+                            options = options.unix_permissions(mode);
+                        }
+                        CompressionArg::LargeFile(large_file) => {
+                            /* writeln!(err, "setting large file flag to {large_file:?}").unwrap(); */
+                            options = options.large_file(large_file);
+                        }
+                        CompressionArg::Name(name) => {
+                            /* writeln!(err, "setting name of next entry to {name:?}").unwrap(); */
+                            if let Some(last_name) = last_name {
+                                return Err(CommandError::InvalidArg(format!(
+                                    "got two names before an entry: {last_name} and {name}"
+                                )));
+                            }
+                            last_name = Some(name);
+                        }
+                        CompressionArg::Symlink => {
+                            /* writeln!(err, "setting symlink flag for next entry").unwrap(); */
+                            if symlink_flag {
+                                /* TODO: make this a warning? */
+                                return Err(CommandError::InvalidArg(
+                                    "symlink flag provided twice before entry".to_string(),
+                                ));
+                            }
+                            symlink_flag = true;
+                        }
+
+                        /* new operations: */
+                        CompressionArg::Dir => {
+                            let last_name = last_name.take();
+                            let symlink_flag = mem::replace(&mut symlink_flag, false);
+
+                            /* writeln!(err, "writing dir entry").unwrap(); */
+                            if symlink_flag {
+                                return Err(CommandError::InvalidArg(
+                                    "symlink flag provided before dir entry".to_string(),
+                                ));
+                            }
+                            let name = last_name.ok_or_else(|| {
+                                CommandError::InvalidArg(
+                                    "no name provided before dir entry".to_string(),
+                                )
+                            })?;
+                            operations.push(ModificationOperation::CreateEntry {
+                                options,
+                                spec: EntrySpec::Dir { name },
+                            });
+                        }
+                        CompressionArg::Immediate(data) => {
+                            let last_name = last_name.take();
+                            let symlink_flag = mem::replace(&mut symlink_flag, false);
+
+                            let name = last_name.ok_or_else(|| {
+                                CommandError::InvalidArg(format!(
+                                    "no name provided for immediate data {data:?}"
+                                ))
+                            })?;
+                            operations.push(ModificationOperation::CreateEntry {
+                                options,
+                                spec: EntrySpec::Immediate {
+                                    name,
+                                    data,
+                                    symlink_flag,
+                                },
+                            });
+                        }
+                        CompressionArg::FilePath(path) => {
+                            let last_name = last_name.take();
+                            let symlink_flag = mem::replace(&mut symlink_flag, false);
+
+                            let name = last_name.unwrap_or_else(|| path_to_string(&path).into());
+                            operations.push(ModificationOperation::CreateEntry {
+                                options,
+                                spec: EntrySpec::File {
+                                    name: Some(name),
+                                    path,
+                                    symlink_flag,
+                                },
+                            });
+                        }
+                        CompressionArg::RecursiveDirPath(path) => {
+                            let last_name = last_name.take();
+                            let symlink_flag = mem::replace(&mut symlink_flag, false);
+
+                            if symlink_flag {
+                                return Err(CommandError::InvalidArg(
+                                    "symlink flag provided before recursive dir entry".to_string(),
+                                ));
+                            }
+
+                            operations.push(ModificationOperation::CreateEntry {
+                                options,
+                                spec: EntrySpec::RecDir {
+                                    name: last_name,
+                                    path,
+                                },
+                            });
+                        }
+                    }
+                }
+                if symlink_flag {
+                    return Err(CommandError::InvalidArg(
+                        "symlink flag remaining after all entry flags processed".to_string(),
+                    ));
+                }
+                if let Some(last_name) = last_name {
+                    return Err(CommandError::InvalidArg(format!(
+                        "name {last_name} remaining after all entry flags processed"
+                    )));
+                }
+
+                for p in positional_paths.into_iter() {
+                    operations.push(ModificationOperation::CreateEntry {
+                        options,
+                        spec: Self::interpret_entry_path(p)?,
+                    });
+                }
+                Ok(ModificationSequence { operations })
+            }
+        }
+
+        impl ArgvResource for ModificationSequence {
+            type ArgvParseError = WrapperError<ModificationSequenceError, CommandError>;
+            fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError> {
+                let compression_args =
+                    CompressionArgs::parse_argv(argv).map_err(WrapperError::In)?;
+                compression_args.build_mod_seq().map_err(WrapperError::Out)
+            }
         }
     }
 
