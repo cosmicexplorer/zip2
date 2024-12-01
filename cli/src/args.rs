@@ -165,11 +165,17 @@ pub mod resource {
         type ArgvParseError;
         fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError>;
 
+        #[cfg(test)]
         fn parse_argv_from(
-            argv: impl IntoIterator<Item = OsString>,
+            argv: impl IntoIterator<Item = impl Into<OsString>>,
         ) -> Result<Self, Self::ArgvParseError> {
             let mut argv: VecDeque<OsString> = argv.into_iter().map(|s| s.into()).collect();
             Self::parse_argv(&mut argv)
+        }
+
+        #[cfg(test)]
+        fn parse_argv_from_empty() -> Result<Self, Self::ArgvParseError> {
+            Self::parse_argv_from(Vec::<OsString>::new())
         }
     }
 

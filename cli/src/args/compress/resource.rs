@@ -236,7 +236,7 @@ pub mod argv {
 
         impl error::Error for ModificationSequenceError {}
 
-        struct CompressionArgs {
+        pub struct CompressionArgs {
             pub args: Vec<CompressionArg>,
             pub positional_paths: Vec<PathBuf>,
         }
@@ -538,11 +538,10 @@ pub mod argv {
                             let last_name = last_name.take();
                             let symlink_flag = mem::replace(&mut symlink_flag, false);
 
-                            let name = last_name.unwrap_or_else(|| path_to_string(&path).into());
                             operations.push(ModificationOperation::CreateEntry {
                                 options,
                                 spec: EntrySpec::File {
-                                    name: Some(name),
+                                    name: last_name,
                                     path,
                                     symlink_flag,
                                 },
@@ -598,6 +597,7 @@ pub mod argv {
             }
         }
     }
+    use compression_args::{CompressionArgs, ModificationSequenceError};
 
     #[cfg(test)]
     mod test {
@@ -607,12 +607,12 @@ pub mod argv {
         fn parse_output_type() {
             assert_eq!(
                 OutputType::default(),
-                OutputType::parse_argv_from([]).unwrap()
+                OutputType::parse_argv_from_empty().unwrap()
             );
 
             assert_eq!(
                 OutputType::Stdout { allow_tty: true },
-                OutputType::parse_argv_from(["--stdout".into()]).unwrap()
+                OutputType::parse_argv_from(["--stdout"]).unwrap()
             );
 
             assert_eq!(
@@ -620,15 +620,14 @@ pub mod argv {
                     path: "asdf".into(),
                     append: false
                 },
-                OutputType::parse_argv_from(["-o".into(), "asdf".into()]).unwrap()
+                OutputType::parse_argv_from(["-o", "asdf"]).unwrap()
             );
             assert_eq!(
                 OutputType::File {
                     path: "asdf".into(),
                     append: true
                 },
-                OutputType::parse_argv_from(["--append".into(), "-o".into(), "asdf".into()])
-                    .unwrap()
+                OutputType::parse_argv_from(["--append", "-o", "asdf"]).unwrap()
             );
         }
 
@@ -636,14 +635,36 @@ pub mod argv {
         fn parse_global_flags() {
             assert_eq!(
                 GlobalFlags::default(),
-                GlobalFlags::parse_argv_from([]).unwrap(),
+                GlobalFlags::parse_argv_from_empty().unwrap(),
             );
 
             assert_eq!(
                 GlobalFlags {
                     archive_comment: Some("asdf".into())
                 },
-                GlobalFlags::parse_argv_from(["--archive-comment".into(), "asdf".into()]).unwrap()
+                GlobalFlags::parse_argv_from(["--archive-comment", "asdf"]).unwrap()
+            );
+        }
+
+        #[test]
+        fn parse_mod_seq() {
+            assert_eq!(
+                ModificationSequence::default(),
+                ModificationSequence::parse_argv_from_empty().unwrap(),
+            );
+
+            assert_eq!(
+                ModificationSequence {
+                    operations: vec![ModificationOperation::CreateEntry {
+                        options: SimpleFileOptions::default(),
+                        spec: EntrySpec::File {
+                            name: None,
+                            path: "file.txt".into(),
+                            symlink_flag: false
+                        },
+                    }],
+                },
+                ModificationSequence::parse_argv_from(["-f", "file.txt"]).unwrap(),
             );
         }
     }

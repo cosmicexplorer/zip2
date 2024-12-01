@@ -372,8 +372,9 @@ pub fn execute_compress(mut err: impl Write, args: Compress) -> Result<(), Comma
         writer.set_raw_comment(comment.into());
     }
 
-    let mod_seq = ModificationSequence::from_args(args, positional_paths, &mut err)?;
-    mod_seq.invoke(&mut writer, &mut err)?;
+    todo!();
+    /* let mod_seq = ModificationSequence::from_args(args, positional_paths, &mut err)?; */
+    /* mod_seq.invoke(&mut writer, &mut err)?; */
 
     let handle = writer
         .finish()

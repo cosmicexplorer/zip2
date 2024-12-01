@@ -69,7 +69,7 @@ impl Default for GlobalFlags {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EntrySpec {
     Dir {
         name: String,
@@ -90,7 +90,7 @@ pub enum EntrySpec {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ModificationOperation {
     CreateEntry {
         options: SimpleFileOptions,
@@ -98,9 +98,17 @@ pub enum ModificationOperation {
     },
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModificationSequence {
     pub operations: Vec<ModificationOperation>,
+}
+
+impl Default for ModificationSequence {
+    fn default() -> Self {
+        Self {
+            operations: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
