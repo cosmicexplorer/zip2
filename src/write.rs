@@ -20,6 +20,7 @@ use indexmap::IndexMap;
 use std::borrow::ToOwned;
 use std::default::Default;
 use std::fmt::{Debug, Formatter};
+use std::hash;
 use std::io;
 use std::io::prelude::*;
 use std::io::Cursor;
@@ -232,6 +233,20 @@ pub(crate) enum EncryptWith<'k> {
     ZipCrypto(ZipCryptoKeys, PhantomData<&'k ()>),
 }
 
+impl hash::Hash for EncryptWith<'_> {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Aes {mode, password} => {
+                mode.hash(state);
+                password.hash(state);
+            }
+            Self::ZipCrypto(keys, _ph) => {
+                keys.hash(state);
+            }
+        }
+    }
+}
+
 #[cfg(fuzzing)]
 impl<'a> arbitrary::Arbitrary<'a> for EncryptWith<'a> {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
@@ -252,7 +267,7 @@ impl<'a> arbitrary::Arbitrary<'a> for EncryptWith<'a> {
 
 /// Metadata for a file to be written
 /* TODO: add accessors for this data as well so options can be introspected! */
-#[derive(Clone, Debug, Copy, Eq, PartialEq)]
+#[derive(Clone, Debug, Copy, Eq, PartialEq, Hash)]
 pub struct FileOptions<'k, T: FileOptionExtension> {
     pub(crate) compression_method: CompressionMethod,
     pub(crate) compression_level: Option<i64>,
