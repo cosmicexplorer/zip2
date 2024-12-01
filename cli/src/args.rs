@@ -209,40 +209,6 @@ pub mod resource {
         }
     }
 
-    pub struct DynResourceWrapper<R> {
-        resource: R,
-    }
-
-    pub trait ArgvDynResource {
-        fn parse_argv_dyn(
-            &self,
-            argv: &mut VecDeque<OsString>,
-        ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>>;
-    }
-
-    impl<R> ArgvDynResource for DynResourceWrapper<R>
-    where
-        R: ArgvResource,
-        <R as ArgvResource>::ArgvParseError: error::Error,
-    {
-        fn parse_argv_dyn(
-            &self,
-            argv: &mut VecDeque<OsString>,
-        ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>> {
-            let Self { resource } = self;
-            resource
-                .parse_argv(argv)
-                .map(|val| {
-                    let val: Box<dyn ResourceValue> = Box::new(val);
-                    val
-                })
-                .map_err(|e| {
-                    let e: Box<dyn error::Error> = Box::new(e);
-                    e
-                })
-        }
-    }
-
     pub trait PositionalArgvResource: ArgvResource {}
 
     pub trait SchemaResource: Resource {
@@ -270,47 +236,6 @@ pub mod resource {
             let v = <Self::B as Backend>::parse(s).map_err(WrapperError::In)?;
             Ok(self.parse_schema(v).map_err(WrapperError::Out)?)
         }
-    }
-
-    pub trait SchemaDynResource {
-        type B: Backend;
-        fn parse_schema_dyn_str<'a>(
-            &'a self,
-            s: <Self::B as Backend>::Str<'a>,
-        ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>>;
-    }
-
-    impl<R> SchemaDynResource for DynResourceWrapper<R>
-    where
-        R: SchemaResource,
-        <R as SchemaResource>::SchemaParseError: error::Error,
-        for<'a> <<R as SchemaResource>::B as Backend>::Err<'a>: error::Error,
-    {
-        type B = <R as SchemaResource>::B;
-        fn parse_schema_dyn_str<'a>(
-            &'a self,
-            s: <Self::B as Backend>::Str<'a>,
-        ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>> {
-            let Self { resource } = self;
-            resource
-                .parse_schema_str(s)
-                .map(|val| {
-                    let val: Box<dyn ResourceValue> = Box::new(val);
-                    val
-                })
-                .map_err(|e| {
-                    let e: Box<dyn error::Error> = Box::new(e);
-                    e
-                })
-        }
-    }
-
-    pub struct CliCommandSpec {
-        resources: Vec<Box<dyn ArgvDynResource>>,
-    }
-
-    pub struct SchemaCommandSpec<B> {
-        resources: Vec<Box<dyn SchemaDynResource<B = B>>>,
     }
 }
 
