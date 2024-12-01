@@ -40,7 +40,7 @@ pub enum CompressionArg {
     RecursiveDirPath(PathBuf),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OutputType {
     Stdout { allow_tty: bool },
     File { path: PathBuf, append: bool },
@@ -54,7 +54,7 @@ impl Default for OutputType {
 
 pub mod resource;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GlobalFlags {
     pub archive_comment: Option<OsString>,
 }
