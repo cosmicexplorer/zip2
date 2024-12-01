@@ -6,7 +6,7 @@ pub struct OutputFlagsResource;
 impl ResourceValue for OutputType {}
 
 impl Resource for OutputFlagsResource {
-    const ID: &'static str = "OUTPUT-FLAGS";
+    /* const ID: &'static str = "OUTPUT-FLAGS"; */
     type Value = OutputType;
     type Args = ();
     fn declare(args: Self::Args) -> Self {
@@ -19,7 +19,7 @@ pub struct GlobalFlagsResource;
 impl ResourceValue for GlobalFlags {}
 
 impl Resource for GlobalFlagsResource {
-    const ID: &'static str = "GLOBAL-FLAGS";
+    /* const ID: &'static str = "GLOBAL-FLAGS"; */
     type Value = GlobalFlags;
     type Args = ();
     fn declare(args: Self::Args) -> Self {
@@ -32,7 +32,7 @@ pub struct ModSeqResource;
 impl ResourceValue for ModificationSequence {}
 
 impl Resource for ModSeqResource {
-    const ID: &'static str = "MOD-SEQ";
+    /* const ID: &'static str = "MOD-SEQ"; */
     type Value = ModificationSequence;
     type Args = ();
     fn declare(args: Self::Args) -> Self {

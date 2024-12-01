@@ -162,7 +162,7 @@ pub mod resource {
     pub trait ResourceValue {}
 
     pub trait Resource {
-        const ID: &'static str;
+        /* const ID: &'static str; */
         type Value: ResourceValue
         where
             Self: Sized;
@@ -175,7 +175,9 @@ pub mod resource {
     }
 
     pub trait ArgvResource: Resource {
-        type ArgvParseError;
+        type ArgvParseError
+        where
+            Self: Sized;
         fn parse_argv(
             &self,
             argv: &mut VecDeque<OsString>,
@@ -183,25 +185,6 @@ pub mod resource {
         where
             <Self as Resource>::Value: Sized,
             Self: Sized;
-
-        fn parse_argv_dyn(
-            &self,
-            argv: &mut VecDeque<OsString>,
-        ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>>
-        where
-            Self::ArgvParseError: error::Error,
-            Self: Sized,
-        {
-            self.parse_argv(argv)
-                .map(|val| {
-                    let val: Box<dyn ResourceValue> = Box::new(val);
-                    val
-                })
-                .map_err(|e| {
-                    let e: Box<dyn error::Error> = Box::new(e);
-                    e
-                })
-        }
 
         #[cfg(test)]
         fn parse_argv_from(
@@ -223,6 +206,40 @@ pub mod resource {
             Self: Sized,
         {
             self.parse_argv_from(Vec::<OsString>::new())
+        }
+    }
+
+    pub struct DynResourceWrapper<R> {
+        resource: R,
+    }
+
+    pub trait ArgvDynResource {
+        fn parse_argv_dyn(
+            &self,
+            argv: &mut VecDeque<OsString>,
+        ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>>;
+    }
+
+    impl<R> ArgvDynResource for DynResourceWrapper<R>
+    where
+        R: ArgvResource,
+        <R as ArgvResource>::ArgvParseError: error::Error,
+    {
+        fn parse_argv_dyn(
+            &self,
+            argv: &mut VecDeque<OsString>,
+        ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>> {
+            let Self { resource } = self;
+            resource
+                .parse_argv(argv)
+                .map(|val| {
+                    let val: Box<dyn ResourceValue> = Box::new(val);
+                    val
+                })
+                .map_err(|e| {
+                    let e: Box<dyn error::Error> = Box::new(e);
+                    e
+                })
         }
     }
 
@@ -283,8 +300,46 @@ pub mod resource {
         }
     }
 
-    pub trait CommandSpec {
-        /* fn resources(&self) -> Vec<Box<dyn ArgvResource>>; */
+    pub trait SchemaDynResource {
+        type B: Backend;
+        fn parse_schema_dyn_str<'a>(
+            &'a self,
+            s: <Self::B as Backend>::Str<'a>,
+        ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>>;
+    }
+
+    impl<R> SchemaDynResource for DynResourceWrapper<R>
+    where
+        R: SchemaResource,
+        <R as SchemaResource>::SchemaParseError: error::Error,
+        for<'a> <<R as SchemaResource>::B as Backend>::Err<'a>: error::Error,
+    {
+        type B = <R as SchemaResource>::B;
+        fn parse_schema_dyn_str<'a>(
+            &'a self,
+            s: <Self::B as Backend>::Str<'a>,
+        ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>> {
+            let Self { resource } = self;
+            resource
+                .parse_schema_str(s)
+                .map(|val| {
+                    let val: Box<dyn ResourceValue> = Box::new(val);
+                    val
+                })
+                .map_err(|e| {
+                    let e: Box<dyn error::Error> = Box::new(e);
+                    e
+                })
+        }
+    }
+
+    pub trait CliCommandSpec {
+        fn resources(&self) -> Vec<Box<dyn ArgvDynResource>>;
+    }
+
+    pub trait SchemaCommandSpec {
+        type B: Backend;
+        fn resources(&self) -> Vec<Box<dyn SchemaDynResource<B = Self::B>>>;
     }
 }
 
