@@ -159,23 +159,30 @@ pub mod resource {
 
     pub trait Resource {
         const ID: &'static str;
+        type Value;
+        type Args;
+        fn declare(args: Self::Args) -> Self;
     }
 
-    pub trait ArgvResource: Resource + Sized {
+    pub trait ArgvResource: Resource {
         type ArgvParseError;
-        fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError>;
+        fn parse_argv(
+            &self,
+            argv: &mut VecDeque<OsString>,
+        ) -> Result<<Self as Resource>::Value, Self::ArgvParseError>;
 
         #[cfg(test)]
         fn parse_argv_from(
+            &self,
             argv: impl IntoIterator<Item = impl Into<OsString>>,
-        ) -> Result<Self, Self::ArgvParseError> {
+        ) -> Result<<Self as Resource>::Value, Self::ArgvParseError> {
             let mut argv: VecDeque<OsString> = argv.into_iter().map(|s| s.into()).collect();
-            Self::parse_argv(&mut argv)
+            self.parse_argv(&mut argv)
         }
 
         #[cfg(test)]
-        fn parse_argv_from_empty() -> Result<Self, Self::ArgvParseError> {
-            Self::parse_argv_from(Vec::<OsString>::new())
+        fn parse_argv_from_empty(&self) -> Result<<Self as Resource>::Value, Self::ArgvParseError> {
+            self.parse_argv_from(Vec::<OsString>::new())
         }
     }
 
@@ -185,20 +192,24 @@ pub mod resource {
         type B: Backend;
         type SchemaParseError;
         fn parse_schema<'a>(
+            &self,
             v: <Self::B as Backend>::Val<'a>,
-        ) -> Result<Self, Self::SchemaParseError>;
+        ) -> Result<<Self as Resource>::Value, Self::SchemaParseError>;
 
         fn parse_schema_str<'a>(
+            &self,
             s: <Self::B as Backend>::Str<'a>,
-        ) -> Result<Self, WrapperError<<Self::B as Backend>::Err<'a>, Self::SchemaParseError>>
-        {
+        ) -> Result<
+            <Self as Resource>::Value,
+            WrapperError<<Self::B as Backend>::Err<'a>, Self::SchemaParseError>,
+        > {
             let v = <Self::B as Backend>::parse(s).map_err(WrapperError::In)?;
-            Ok(Self::parse_schema(v).map_err(WrapperError::Out)?)
+            Ok(self.parse_schema(v).map_err(WrapperError::Out)?)
         }
     }
 
     pub trait CommandSpec {
-        /* fn resources() -> Vec<>; */
+        /* fn resources() -> Vec<A>; */
     }
 }
 

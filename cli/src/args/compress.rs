@@ -118,8 +118,6 @@ pub struct Compress {
     pub mod_seq: ModificationSequence,
 }
 
-/* impl CommandInputs for Compress {} */
-
 impl Compress {
     #[cfg(feature = "deflate64")]
     const DEFLATE64_HELP_LINE: &'static str = "          - deflate64:\twith deflate64\n";
@@ -330,13 +328,23 @@ ENTRY-PATH = <path>
             }
         }
 
-        use crate::args::resource::ArgvResource;
+        use crate::args::{
+            compress::resource::{GlobalFlagsResource, ModSeqResource, OutputFlagsResource},
+            resource::{ArgvResource, Resource},
+        };
 
-        let output = OutputType::parse_argv(&mut argv)
+        let output = OutputFlagsResource::declare(());
+        let global_flags = GlobalFlagsResource::declare(());
+        let mod_seq = ModSeqResource::declare(());
+
+        let output = output
+            .parse_argv(&mut argv)
             .map_err(|e| Self::exit_arg_invalid(&format!("{e}")))?;
-        let global_flags = GlobalFlags::parse_argv(&mut argv)
+        let global_flags = global_flags
+            .parse_argv(&mut argv)
             .map_err(|e| Self::exit_arg_invalid(&format!("{e}")))?;
-        let mod_seq = ModificationSequence::parse_argv(&mut argv)
+        let mod_seq = mod_seq
+            .parse_argv(&mut argv)
             .map_err(|e| Self::exit_arg_invalid(&format!("{e:?}")))?;
 
         Ok(Self {
