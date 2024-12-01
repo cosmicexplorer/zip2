@@ -114,9 +114,8 @@ impl Default for ModificationSequence {
 #[derive(Debug)]
 pub struct Compress {
     pub output: OutputType,
-    pub archive_comment: Option<OsString>,
-    pub args: Vec<CompressionArg>,
-    pub positional_paths: Vec<PathBuf>,
+    pub global_flags: GlobalFlags,
+    pub mod_seq: ModificationSequence,
 }
 
 /* impl CommandInputs for Compress {} */
@@ -319,262 +318,31 @@ ENTRY-PATH = <path>
     }
 
     fn parse_argv(mut argv: VecDeque<OsString>) -> Result<Self, ArgParseError> {
-        let mut allow_stdout: bool = false;
-        let mut append_to_output_path: bool = false;
-        let mut output_path: Option<PathBuf> = None;
-        let mut archive_comment: Option<OsString> = None;
-        let mut args: Vec<CompressionArg> = Vec::new();
-        let mut positional_paths: Vec<PathBuf> = Vec::new();
-
-        while let Some(arg) = argv.pop_front() {
+        if let Some(arg) = argv.pop_front() {
             match arg.as_encoded_bytes() {
                 b"-h" | b"--help" => {
                     let help_text = Self::generate_full_help_text();
                     return Err(ArgParseError::StdoutMessage(help_text));
                 }
-
-                /* Output flags */
-                b"--stdout" => {
-                    if let Some(output_path) = output_path.take() {
-                        return Err(Self::exit_arg_invalid(&format!(
-                            "--stdout provided along with output file {output_path:?}"
-                        )));
-                    } else if append_to_output_path {
-                        return Err(Self::exit_arg_invalid(
-                            "--stdout provided along with --append",
-                        ));
-                    } else if !args.is_empty() || !positional_paths.is_empty() {
-                        return Err(Self::exit_arg_invalid("--stdout provided after entries"));
-                    } else if allow_stdout {
-                        return Err(Self::exit_arg_invalid("--stdout provided twice"));
-                    } else {
-                        allow_stdout = true;
-                    }
-                }
-                b"--append" => {
-                    if append_to_output_path {
-                        return Err(Self::exit_arg_invalid("--append provided twice"));
-                    } else if !args.is_empty() || !positional_paths.is_empty() {
-                        return Err(Self::exit_arg_invalid("--append provided after entries"));
-                    } else if allow_stdout {
-                        return Err(Self::exit_arg_invalid(
-                            "--stdout provided along with --append",
-                        ));
-                    } else {
-                        append_to_output_path = true;
-                    }
-                }
-                b"-o" | b"--output-file" => {
-                    let new_path = argv.pop_front().map(PathBuf::from).ok_or_else(|| {
-                        Self::exit_arg_invalid("no argument provided for -o/--output-file")
-                    })?;
-                    if let Some(prev_path) = output_path.take() {
-                        return Err(Self::exit_arg_invalid(&format!(
-                            "--output-file provided twice: {prev_path:?} and {new_path:?}"
-                        )));
-                    } else if allow_stdout {
-                        return Err(Self::exit_arg_invalid(
-                            "--stdout provided along with output file",
-                        ));
-                    } else if !args.is_empty() || !positional_paths.is_empty() {
-                        return Err(Self::exit_arg_invalid(
-                            "-o/--output-file provided after entries",
-                        ));
-                    } else {
-                        output_path = Some(new_path);
-                    }
-                }
-
-                /* Global flags */
-                b"--archive-comment" => {
-                    let new_comment = argv.pop_front().ok_or_else(|| {
-                        Self::exit_arg_invalid("no argument provided for --archive-comment")
-                    })?;
-                    if let Some(prev_comment) = archive_comment.take() {
-                        return Err(Self::exit_arg_invalid(&format!(
-                            "--archive-comment provided twice: {prev_comment:?} and {new_comment:?}"
-                        )));
-                    } else if !args.is_empty() || !positional_paths.is_empty() {
-                        return Err(Self::exit_arg_invalid(
-                            "--archive-comment provided after entries",
-                        ));
-                    } else {
-                        archive_comment = Some(new_comment);
-                    }
-                }
-
-                /* Attributes */
-                b"-c" | b"--compression-method" => match argv.pop_front() {
-                    None => {
-                        return Err(Self::exit_arg_invalid(
-                            "no argument provided for -c/--compression-method",
-                        ))
-                    }
-                    Some(name) => match name.as_encoded_bytes() {
-                        b"stored" => args.push(CompressionArg::CompressionMethod(
-                            CompressionMethodArg::Stored,
-                        )),
-                        b"deflate" => args.push(CompressionArg::CompressionMethod(
-                            CompressionMethodArg::Deflate,
-                        )),
-                        #[cfg(feature = "deflate64")]
-                        b"deflate64" => args.push(CompressionArg::CompressionMethod(
-                            CompressionMethodArg::Deflate64,
-                        )),
-                        #[cfg(feature = "bzip2")]
-                        b"bzip2" => args.push(CompressionArg::CompressionMethod(
-                            CompressionMethodArg::Bzip2,
-                        )),
-                        #[cfg(feature = "zstd")]
-                        b"zstd" => args.push(CompressionArg::CompressionMethod(
-                            CompressionMethodArg::Zstd,
-                        )),
-                        _ => {
-                            return Err(Self::exit_arg_invalid(
-                                "unrecognized compression method {name:?}",
-                            ));
-                        }
-                    },
-                },
-                b"-l" | b"--compression-level" => match argv.pop_front() {
-                    None => {
-                        return Err(Self::exit_arg_invalid(
-                            "no argument provided for -l/--compression-level",
-                        ));
-                    }
-                    Some(level) => match level.into_string() {
-                        Err(level) => {
-                            return Err(Self::exit_arg_invalid(&format!(
-                                "invalid unicode provided for compression level: {level:?}"
-                            )));
-                        }
-                        Ok(level) => match level.parse::<i64>() {
-                            Err(e) => {
-                                return Err(Self::exit_arg_invalid(&format!(
-                                    "failed to parse integer for compression level: {e}"
-                                )));
-                            }
-                            Ok(level) => {
-                                if (0..=24).contains(&level) {
-                                    args.push(CompressionArg::Level(CompressionLevel(level)))
-                                } else {
-                                    return Err(Self::exit_arg_invalid(&format!(
-                                        "compression level {level} was not between 0 and 24"
-                                    )));
-                                }
-                            }
-                        },
-                    },
-                },
-                b"-m" | b"--mode" => match argv.pop_front() {
-                    None => {
-                        return Err(Self::exit_arg_invalid("no argument provided for -m/--mode"));
-                    }
-                    Some(mode) => match mode.into_string() {
-                        Err(mode) => {
-                            return Err(Self::exit_arg_invalid(&format!(
-                                "invalid unicode provided for mode: {mode:?}"
-                            )));
-                        }
-                        Ok(mode) => match UnixPermissions::parse(&mode) {
-                            Err(e) => {
-                                return Err(Self::exit_arg_invalid(&format!(
-                                    "failed to parse integer for mode: {e}"
-                                )));
-                            }
-                            Ok(mode) => args.push(CompressionArg::UnixPermissions(mode)),
-                        },
-                    },
-                },
-                b"--large-file" => match argv.pop_front() {
-                    None => {
-                        return Err(Self::exit_arg_invalid(
-                            "no argument provided for --large-file",
-                        ));
-                    }
-                    Some(large_file) => match large_file.as_encoded_bytes() {
-                        b"true" => args.push(CompressionArg::LargeFile(true)),
-                        b"false" => args.push(CompressionArg::LargeFile(false)),
-                        _ => {
-                            return Err(Self::exit_arg_invalid(&format!(
-                                "unrecognized value for --large-file: {large_file:?}"
-                            )));
-                        }
-                    },
-                },
-
-                /* Data */
-                b"-n" | b"--name" => match argv.pop_front() {
-                    None => {
-                        return Err(Self::exit_arg_invalid("no argument provided for -n/--name"))
-                    }
-                    Some(name) => match name.into_string() {
-                        Err(name) => {
-                            return Err(Self::exit_arg_invalid(&format!(
-                                "invalid unicode provided for name: {name:?}"
-                            )));
-                        }
-                        Ok(name) => args.push(CompressionArg::Name(name)),
-                    },
-                },
-                b"-s" | b"--symlink" => args.push(CompressionArg::Symlink),
-                b"-d" | b"--dir" => args.push(CompressionArg::Dir),
-                b"-i" | b"--immediate" => match argv.pop_front() {
-                    None => {
-                        return Err(Self::exit_arg_invalid(
-                            "no argument provided for -i/--immediate",
-                        ));
-                    }
-                    Some(data) => args.push(CompressionArg::Immediate(data)),
-                },
-                b"-f" | b"--file" => match argv.pop_front() {
-                    None => {
-                        return Err(Self::exit_arg_invalid("no argument provided for -f/--file"));
-                    }
-                    Some(file) => args.push(CompressionArg::FilePath(file.into())),
-                },
-                b"-r" | b"--recursive-dir" => match argv.pop_front() {
-                    None => {
-                        return Err(Self::exit_arg_invalid(
-                            "no argument provided for -r/--recursive-dir",
-                        ));
-                    }
-                    Some(dir) => args.push(CompressionArg::RecursiveDirPath(dir.into())),
-                },
-
-                /* Transition to positional args */
-                b"--" => break,
-                arg_bytes => {
-                    if arg_bytes.starts_with(b"-") {
-                        return Err(Self::exit_arg_invalid(&format!(
-                            "unrecognized flag {arg:?}"
-                        )));
-                    } else {
-                        argv.push_front(arg);
-                        break;
-                    }
+                _ => {
+                    argv.push_front(arg);
                 }
             }
         }
 
-        positional_paths.extend(argv.into_iter().map(|arg| arg.into()));
+        use crate::args::resource::ArgvResource;
 
-        let output = if let Some(path) = output_path {
-            OutputType::File {
-                path,
-                append: append_to_output_path,
-            }
-        } else {
-            OutputType::Stdout {
-                allow_tty: allow_stdout,
-            }
-        };
+        let output = OutputType::parse_argv(&mut argv)
+            .map_err(|e| Self::exit_arg_invalid(&format!("{e}")))?;
+        let global_flags = GlobalFlags::parse_argv(&mut argv)
+            .map_err(|e| Self::exit_arg_invalid(&format!("{e}")))?;
+        let mod_seq = ModificationSequence::parse_argv(&mut argv)
+            .map_err(|e| Self::exit_arg_invalid(&format!("{e:?}")))?;
 
         Ok(Self {
             output,
-            archive_comment,
-            args,
-            positional_paths,
+            global_flags,
+            mod_seq,
         })
     }
 }

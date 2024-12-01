@@ -292,9 +292,8 @@ fn enter_recursive_dir_entries(
 pub fn execute_compress(mut err: impl Write, args: Compress) -> Result<(), CommandError> {
     let Compress {
         output,
-        archive_comment,
-        args,
-        positional_paths,
+        global_flags,
+        mod_seq,
     } = args;
 
     let (out, do_append) = match output {
@@ -366,15 +365,14 @@ pub fn execute_compress(mut err: impl Write, args: Compress) -> Result<(), Comma
         ZipWriter::new(out)
     };
 
+    let GlobalFlags { archive_comment } = global_flags;
     if let Some(comment) = archive_comment {
         writeln!(err, "comment was provided: {comment:?}").unwrap();
         let comment = comment.into_encoded_bytes();
         writer.set_raw_comment(comment.into());
     }
 
-    todo!();
-    /* let mod_seq = ModificationSequence::from_args(args, positional_paths, &mut err)?; */
-    /* mod_seq.invoke(&mut writer, &mut err)?; */
+    mod_seq.invoke(&mut writer, &mut err)?;
 
     let handle = writer
         .finish()
