@@ -157,9 +157,9 @@ pub mod resource {
 
     use crate::schema::{backends::Backend, transformers::WrapperError};
 
-    use std::error;
+    use std::{any, error};
 
-    pub trait ResourceValue {}
+    pub trait ResourceValue: any::Any {}
 
     pub trait Resource {
         /* const ID: &'static str; */
@@ -243,35 +243,7 @@ pub mod resource {
         }
     }
 
-    pub trait PositionalArgvResource: ArgvResource {
-        /* fn parse_argv_ensure_complete( */
-        /*     &self, */
-        /*     mut argv: VecDeque<OsString>, */
-        /* ) -> Result<<Self as Resource>::Value, Self::ArgvParseError> */
-        /* where */
-        /*     <Self as Resource>::Value: Sized, */
-        /*     Self: Sized, */
-        /* { */
-        /*     let ret = self.parse_argv(&mut argv)?; */
-        /*     assert!(argv.is_empty(), "argv should have been drained: {argv:?}"); */
-        /*     Ok(ret) */
-        /* } */
-
-        /* fn parse_argv_ensure_complete_dyn( */
-        /*     &self, */
-        /*     mut argv: VecDeque<OsString>, */
-        /* ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>> { */
-        /*     self.parse_argv_ensure_complete(argv) */
-        /*         .map(|val| { */
-        /*             let val: Box<dyn ResourceValue> = Box::new(val); */
-        /*             val */
-        /*         }) */
-        /*         .map_err(|e| { */
-        /*             let e: Box<dyn error::Error> = Box::new(e); */
-        /*             e */
-        /*         }) */
-        /* } */
-    }
+    pub trait PositionalArgvResource: ArgvResource {}
 
     pub trait SchemaResource: Resource {
         type B: Backend;
@@ -333,13 +305,12 @@ pub mod resource {
         }
     }
 
-    pub trait CliCommandSpec {
-        fn resources(&self) -> Vec<Box<dyn ArgvDynResource>>;
+    pub struct CliCommandSpec {
+        resources: Vec<Box<dyn ArgvDynResource>>,
     }
 
-    pub trait SchemaCommandSpec {
-        type B: Backend;
-        fn resources(&self) -> Vec<Box<dyn SchemaDynResource<B = Self::B>>>;
+    pub struct SchemaCommandSpec<B> {
+        resources: Vec<Box<dyn SchemaDynResource<B = B>>>,
     }
 }
 
@@ -393,6 +364,37 @@ error: {context}
     fn parse_argv(argv: VecDeque<OsString>) -> Result<Self, ArgParseError>
     where
         Self: Sized;
+}
+
+pub trait ComposedCommand: CommandFormat {
+    type ResourceArgs;
+    fn get_resource_args() -> Self::ResourceArgs;
+    fn from_resource_args(
+        args: Self::ResourceArgs,
+        argv: VecDeque<OsString>,
+    ) -> Result<Self, ArgParseError>
+    where
+        Self: Sized;
+
+    fn parse_composed_argv(mut argv: VecDeque<OsString>) -> Result<Self, ArgParseError>
+    where
+        Self: Sized,
+    {
+        if let Some(arg) = argv.pop_front() {
+            match arg.as_encoded_bytes() {
+                b"-h" | b"--help" => {
+                    let help_text = Self::generate_full_help_text();
+                    return Err(ArgParseError::StdoutMessage(help_text));
+                }
+                _ => {
+                    argv.push_front(arg);
+                }
+            }
+        }
+
+        let spec = Self::get_resource_args();
+        Self::from_resource_args(spec, argv)
+    }
 }
 
 pub mod compress;
