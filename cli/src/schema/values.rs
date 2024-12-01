@@ -21,6 +21,82 @@ pub trait NamedList {
 /*     Obj(Vec<(String, Box<Schema>)>), */
 /* } */
 
+/* pub trait Schema {} */
+
+/* pub enum Command { */
+/*     /// Write a JSON object to stdout which contains all the file paths under */
+/*     /// the top-level `paths`. */
+/*     Crawl { */
+/*         #[command(flatten)] */
+/*         crawl: MedusaCrawl, */
+/*     }, */
+/*     /// Consume a JSON object from [`Self::Crawl`] over stdin and write those */
+/*     /// files into a zip file at `output`. */
+/*     Zip { */
+/*         #[command(flatten)] */
+/*         output: Output, */
+/*         #[command(flatten)] */
+/*         zip_options: ZipOutputOptions, */
+/*         #[command(flatten)] */
+/*         modifications: EntryModifications, */
+/*         #[arg(long, value_enum, default_value_t)] */
+/*         parallelism: Parallelism, */
+/*     }, */
+/*     /// Merge the content of several zip files into one. */
+/*     Merge { */
+/*         #[command(flatten)] */
+/*         output: Output, */
+/*         /// ??? */
+/*         #[command(flatten)] */
+/*         mtime_behavior: ModifiedTimeBehavior, */
+/*         #[command(flatten)] */
+/*         merge: MedusaMerge, */
+/*     }, */
+/*     /// Perform a `crawl` and then a `zip` on its output in memory. */
+/*     CrawlZip { */
+/*         #[command(flatten)] */
+/*         crawl: MedusaCrawl, */
+/*         #[command(flatten)] */
+/*         output: Output, */
+/*         #[command(flatten)] */
+/*         zip_options: ZipOutputOptions, */
+/*         #[command(flatten)] */
+/*         modifications: EntryModifications, */
+/*         #[arg(long, value_enum, default_value_t)] */
+/*         parallelism: Parallelism, */
+/*     }, */
+/*     /// Perform a `zip` and then a `merge` without releasing the output file */
+/*     /// handle. */
+/*     ZipMerge { */
+/*         #[command(flatten)] */
+/*         output: Output, */
+/*         #[command(flatten)] */
+/*         zip_options: ZipOutputOptions, */
+/*         #[command(flatten)] */
+/*         modifications: EntryModifications, */
+/*         #[arg(long, value_enum, default_value_t)] */
+/*         parallelism: Parallelism, */
+/*         #[command(flatten)] */
+/*         merge: MedusaMerge, */
+/*     }, */
+/*     /// Perform `crawl`, then a `zip` on its output in memory, then a `merge` */
+/*     /// into the same output file. */
+/*     CrawlZipMerge { */
+/*         #[command(flatten)] */
+/*         crawl: MedusaCrawl, */
+/*         #[command(flatten)] */
+/*         output: Output, */
+/*         #[command(flatten)] */
+/*         zip_options: ZipOutputOptions, */
+/*         #[command(flatten)] */
+/*         modifications: EntryModifications, */
+/*         #[arg(long, value_enum, default_value_t)] */
+/*         parallelism: Parallelism, */
+/*         #[command(flatten)] */
+/*         merge: MedusaMerge, */
+/*     }, */
+/* } */
+
 pub enum HydratedValue<'a> {
     Bool(bool),
     Str(&'a str),

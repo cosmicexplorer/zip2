@@ -46,7 +46,26 @@ pub enum OutputType {
     File { path: PathBuf, append: bool },
 }
 
+impl Default for OutputType {
+    fn default() -> Self {
+        Self::Stdout { allow_tty: false }
+    }
+}
+
 pub mod resource;
+
+#[derive(Debug)]
+pub struct GlobalFlags {
+    pub archive_comment: Option<OsString>,
+}
+
+impl Default for GlobalFlags {
+    fn default() -> Self {
+        Self {
+            archive_comment: None,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Compress {
