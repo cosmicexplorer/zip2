@@ -82,6 +82,33 @@ pub mod argv {
     impl error::Error for OutputTypeError {}
 
     impl ArgvResource for OutputFlagsResource {
+        /* fn print_help(&self) -> String { */
+/*             r#" */
+/* Output flags (OUTPUT-FLAGS): Where and how to write the generated zip archive. */
+
+/* If not specified, output is written to stdout. */
+
+/* OUTPUT-FLAGS = [--append] --output-file <file> */
+/*              = --stdout */
+
+/*   -o, --output-file <file> */
+/*           Output zip file path to write. */
+
+/*           The output file is truncated if it already exists, unless --append is */
+/*           provided. */
+
+/*       --append */
+/*           If an output path is provided with -o, open it as an existing zip */
+/*           archive and append to it. */
+
+/*           If the output path does not already exist, no error is produced, and */
+/*           a new zip file is created at the given path. */
+
+/*       --stdout */
+/*           Allow writing output to stdout even if stdout is a tty. */
+/* "# */
+/*         } */
+
         type ArgvParseError = OutputTypeError;
         fn parse_argv(
             &self,

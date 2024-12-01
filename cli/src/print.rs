@@ -40,7 +40,24 @@ pub mod printer {
     }
 }
 
-pub trait HelpSection {}
+pub trait HelpCase {
+    fn value(&self) -> &str;
+    fn description(&self) -> String;
+    fn extended_description_with_caveats_and_defaults(&self) -> Option<String>;
+}
+
+pub trait HelpSection {
+    fn name(&self) -> &str;
+    fn id(&self) -> &str;
+    fn description(&self) -> Option<String>;
+    fn extended_description_with_caveats_and_defaults(&self) -> Option<String>;
+    fn cases(&self) -> Vec<Box<dyn HelpCase>>;
+    fn post(&self) -> Option<String>;
+}
+
+pub struct FlagsSection {}
+
+pub struct StringPattern {}
 
 pub enum HelpVerbosity {
     NameOnly,
