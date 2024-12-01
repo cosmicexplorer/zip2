@@ -1,146 +1,210 @@
 use super::{GlobalFlags, OutputType};
 use crate::args::resource::*;
 
-use std::{collections::VecDeque, ffi::OsString, path::PathBuf};
-
-pub enum OutputTypeError {
-    ArgWith(&'static str, String),
-    ArgTwice(&'static str),
-    NoValFor(&'static str),
-    ValArgTwice {
-        arg: &'static str,
-        prev: String,
-        new: String,
-    },
-}
-
 impl Resource for OutputType {
     const ID: &'static str = "OUTPUT-FLAGS";
-}
-
-impl ArgvResource for OutputType {
-    type ArgvParseError = OutputTypeError;
-    fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError> {
-        let mut allow_stdout: bool = false;
-        let mut append_to_output_path: bool = false;
-        let mut output_path: Option<PathBuf> = None;
-
-        while let Some(arg) = argv.pop_front() {
-            match arg.as_encoded_bytes() {
-                b"--stdout" => {
-                    if let Some(output_path) = output_path.take() {
-                        return Err(OutputTypeError::ArgWith(
-                            "--stdout",
-                            format!("output file {output_path:?}"),
-                        ));
-                    }
-                    if append_to_output_path {
-                        return Err(OutputTypeError::ArgWith("--stdout", "--append".to_string()));
-                    }
-                    if allow_stdout {
-                        return Err(OutputTypeError::ArgTwice("--stdout"));
-                    }
-                    allow_stdout = true;
-                }
-                b"--append" => {
-                    if append_to_output_path {
-                        return Err(OutputTypeError::ArgTwice("--append"));
-                    }
-                    if allow_stdout {
-                        return Err(OutputTypeError::ArgWith("--append", "--stdout".to_string()));
-                    }
-                    append_to_output_path = true;
-                }
-                b"-o" | b"--output-file" => {
-                    let new_path = argv
-                        .pop_front()
-                        .map(PathBuf::from)
-                        .ok_or_else(|| OutputTypeError::NoValFor("-o/--output-file"))?;
-                    if let Some(prev_path) = output_path.take() {
-                        return Err(OutputTypeError::ValArgTwice {
-                            arg: "-o/--output-file",
-                            prev: format!("{prev_path:?}"),
-                            new: format!("{new_path:?}"),
-                        });
-                    }
-                    if allow_stdout {
-                        return Err(OutputTypeError::ArgWith(
-                            "--stdout",
-                            "-o/--output-file".to_string(),
-                        ));
-                    }
-                    output_path = Some(new_path);
-                }
-                _ => {
-                    argv.push_front(arg);
-                    break;
-                }
-            }
-        }
-
-        Ok(if let Some(output_path) = output_path {
-            Self::File {
-                path: output_path,
-                append: append_to_output_path,
-            }
-        } else {
-            Self::Stdout {
-                allow_tty: allow_stdout,
-            }
-        })
-    }
-}
-
-pub enum GlobalFlagsError {
-    NoValFor(&'static str),
-    ValArgTwice {
-        arg: &'static str,
-        prev: String,
-        new: String,
-    },
 }
 
 impl Resource for GlobalFlags {
     const ID: &'static str = "GLOBAL-FLAGS";
 }
 
-impl ArgvResource for GlobalFlags {
-    type ArgvParseError = GlobalFlagsError;
-    fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError> {
-        let mut archive_comment: Option<OsString> = None;
+pub mod argv {
+    use super::{GlobalFlags, OutputType};
+    use crate::args::resource::ArgvResource;
+    use std::{collections::VecDeque, ffi::OsString, path::PathBuf};
 
-        while let Some(arg) = argv.pop_front() {
-            match arg.as_encoded_bytes() {
-                b"--archive-comment" => {
-                    let new_comment = argv
-                        .pop_front()
-                        .ok_or_else(|| GlobalFlagsError::NoValFor("--archive-comment"))?;
-                    if let Some(prev_comment) = archive_comment.take() {
-                        return Err(GlobalFlagsError::ValArgTwice {
-                            arg: "--archive-comment",
-                            prev: format!("{prev_comment:?}"),
-                            new: format!("{new_comment:?}"),
-                        });
+    #[derive(Debug)]
+    pub enum OutputTypeError {
+        ArgWith(&'static str, String),
+        ArgTwice(&'static str),
+        NoValFor(&'static str),
+        ValArgTwice {
+            arg: &'static str,
+            prev: String,
+            new: String,
+        },
+    }
+
+    impl ArgvResource for OutputType {
+        type ArgvParseError = OutputTypeError;
+        fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError> {
+            let mut allow_stdout: bool = false;
+            let mut append_to_output_path: bool = false;
+            let mut output_path: Option<PathBuf> = None;
+
+            while let Some(arg) = argv.pop_front() {
+                match arg.as_encoded_bytes() {
+                    b"--stdout" => {
+                        if let Some(output_path) = output_path.take() {
+                            return Err(OutputTypeError::ArgWith(
+                                "--stdout",
+                                format!("output file {output_path:?}"),
+                            ));
+                        }
+                        if append_to_output_path {
+                            return Err(OutputTypeError::ArgWith(
+                                "--stdout",
+                                "--append".to_string(),
+                            ));
+                        }
+                        if allow_stdout {
+                            return Err(OutputTypeError::ArgTwice("--stdout"));
+                        }
+                        allow_stdout = true;
                     }
-                    archive_comment = Some(new_comment);
-                }
-                _ => {
-                    argv.push_front(arg);
-                    break;
+                    b"--append" => {
+                        if append_to_output_path {
+                            return Err(OutputTypeError::ArgTwice("--append"));
+                        }
+                        if allow_stdout {
+                            return Err(OutputTypeError::ArgWith(
+                                "--append",
+                                "--stdout".to_string(),
+                            ));
+                        }
+                        append_to_output_path = true;
+                    }
+                    b"-o" | b"--output-file" => {
+                        let new_path = argv
+                            .pop_front()
+                            .map(PathBuf::from)
+                            .ok_or_else(|| OutputTypeError::NoValFor("-o/--output-file"))?;
+                        if let Some(prev_path) = output_path.take() {
+                            return Err(OutputTypeError::ValArgTwice {
+                                arg: "-o/--output-file",
+                                prev: format!("{prev_path:?}"),
+                                new: format!("{new_path:?}"),
+                            });
+                        }
+                        if allow_stdout {
+                            return Err(OutputTypeError::ArgWith(
+                                "--stdout",
+                                "-o/--output-file".to_string(),
+                            ));
+                        }
+                        output_path = Some(new_path);
+                    }
+                    _ => {
+                        argv.push_front(arg);
+                        break;
+                    }
                 }
             }
+
+            Ok(if let Some(output_path) = output_path {
+                Self::File {
+                    path: output_path,
+                    append: append_to_output_path,
+                }
+            } else {
+                Self::Stdout {
+                    allow_tty: allow_stdout,
+                }
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    pub enum GlobalFlagsError {
+        NoValFor(&'static str),
+        ValArgTwice {
+            arg: &'static str,
+            prev: String,
+            new: String,
+        },
+    }
+
+    impl ArgvResource for GlobalFlags {
+        type ArgvParseError = GlobalFlagsError;
+        fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError> {
+            let mut archive_comment: Option<OsString> = None;
+
+            while let Some(arg) = argv.pop_front() {
+                match arg.as_encoded_bytes() {
+                    b"--archive-comment" => {
+                        let new_comment = argv
+                            .pop_front()
+                            .ok_or_else(|| GlobalFlagsError::NoValFor("--archive-comment"))?;
+                        if let Some(prev_comment) = archive_comment.take() {
+                            return Err(GlobalFlagsError::ValArgTwice {
+                                arg: "--archive-comment",
+                                prev: format!("{prev_comment:?}"),
+                                new: format!("{new_comment:?}"),
+                            });
+                        }
+                        archive_comment = Some(new_comment);
+                    }
+                    _ => {
+                        argv.push_front(arg);
+                        break;
+                    }
+                }
+            }
+
+            Ok(Self { archive_comment })
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        #[test]
+        fn parse_output_type() {
+            assert_eq!(
+                OutputType::default(),
+                OutputType::parse_argv_from([]).unwrap()
+            );
+
+            assert_eq!(
+                OutputType::Stdout { allow_tty: true },
+                OutputType::parse_argv_from(["--stdout".into()]).unwrap()
+            );
+
+            assert_eq!(
+                OutputType::File {
+                    path: "asdf".into(),
+                    append: false
+                },
+                OutputType::parse_argv_from(["-o".into(), "asdf".into()]).unwrap()
+            );
+            assert_eq!(
+                OutputType::File {
+                    path: "asdf".into(),
+                    append: true
+                },
+                OutputType::parse_argv_from(["--append".into(), "-o".into(), "asdf".into()])
+                    .unwrap()
+            );
         }
 
-        Ok(Self { archive_comment })
+        #[test]
+        fn parse_global_flags() {
+            assert_eq!(
+                GlobalFlags::default(),
+                GlobalFlags::parse_argv_from([]).unwrap(),
+            );
+
+            assert_eq!(
+                GlobalFlags {
+                    archive_comment: Some("asdf".into())
+                },
+                GlobalFlags::parse_argv_from(["--archive-comment".into(), "asdf".into()]).unwrap()
+            );
+        }
     }
 }
 
 #[cfg(feature = "json")]
 pub mod json_resource {
-    use super::*;
-    use crate::schema::backends::{json_backend::JsonBackend, Backend};
+    use super::{GlobalFlags, OutputType};
+    use crate::{
+        args::resource::SchemaResource,
+        schema::backends::{json_backend::JsonBackend, Backend},
+    };
 
-    use std::{error, fmt};
+    use std::{error, ffi::OsString, fmt, path::PathBuf};
 
     use json::{object::Object as JsonObject, JsonValue};
 
