@@ -186,6 +186,8 @@ pub mod resource {
             <Self as Resource>::Value: Sized,
             Self: Sized;
 
+        /* fn print_help(&self) -> String; */
+
         #[cfg(test)]
         fn parse_argv_from(
             &self,
