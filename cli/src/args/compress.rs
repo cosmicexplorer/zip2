@@ -1,10 +1,12 @@
-use super::{ArgParseError, CommandFormat};
+use super::{ArgParseError, CommandFormat, ComposedCommand};
 
 use zip::{write::SimpleFileOptions, CompressionMethod};
 
 use std::{collections::VecDeque, ffi::OsString, num::ParseIntError, path::PathBuf};
 
 pub mod resource;
+use super::resource::{ArgvResource, Resource};
+use resource::{GlobalFlagsResource, ModSeqResource, OutputFlagsResource};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CompressionMethodArg {
@@ -315,28 +317,28 @@ ENTRY-PATH = <path>
         )
     }
 
-    fn parse_argv(mut argv: VecDeque<OsString>) -> Result<Self, ArgParseError> {
-        if let Some(arg) = argv.pop_front() {
-            match arg.as_encoded_bytes() {
-                b"-h" | b"--help" => {
-                    let help_text = Self::generate_full_help_text();
-                    return Err(ArgParseError::StdoutMessage(help_text));
-                }
-                _ => {
-                    argv.push_front(arg);
-                }
-            }
-        }
+    fn parse_argv(mut argv: VecDeque<OsString>) -> Result<Self, ArgParseError>
+    where
+        Self: Sized,
+    {
+        ComposedCommand::parse_composed_argv(argv)
+    }
+}
 
-        use crate::args::{
-            compress::resource::{GlobalFlagsResource, ModSeqResource, OutputFlagsResource},
-            resource::{ArgvResource, Resource},
-        };
-
-        let output = OutputFlagsResource::declare(());
-        let global_flags = GlobalFlagsResource::declare(());
-        let mod_seq = ModSeqResource::declare(());
-
+impl ComposedCommand for Compress {
+    type ResourceArgs = (OutputFlagsResource, GlobalFlagsResource, ModSeqResource);
+    fn get_resource_args() -> Self::ResourceArgs {
+        (
+            OutputFlagsResource::declare(()),
+            GlobalFlagsResource::declare(()),
+            ModSeqResource::declare(()),
+        )
+    }
+    fn from_resource_args(
+        args: Self::ResourceArgs,
+        mut argv: VecDeque<OsString>,
+    ) -> Result<Self, ArgParseError> {
+        let (output, global_flags, mod_seq) = args;
         let output = output
             .parse_argv(&mut argv)
             .map_err(|e| Self::exit_arg_invalid(&format!("{e}")))?;
