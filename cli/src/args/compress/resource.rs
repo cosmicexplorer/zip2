@@ -16,7 +16,7 @@ impl Resource for ModificationSequence {
 pub mod argv {
     use super::*;
 
-    use std::{collections::VecDeque, ffi::OsString, fmt, path::PathBuf};
+    use std::{collections::VecDeque, error, ffi::OsString, fmt, path::PathBuf};
 
     #[derive(Debug)]
     pub enum OutputTypeError {
@@ -29,6 +29,30 @@ pub mod argv {
             new: String,
         },
     }
+
+    impl fmt::Display for OutputTypeError {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                Self::ArgWith(arg_name, other_entity) => {
+                    write!(f, "{arg_name} is mutually exclusive with {other_entity}")
+                }
+                Self::ArgTwice(arg_name) => {
+                    write!(f, "{arg_name} provided twice")
+                }
+                Self::NoValFor(arg_name) => {
+                    write!(f, "no value provided for {arg_name}")
+                }
+                Self::ValArgTwice { arg, prev, new } => {
+                    write!(
+                        f,
+                        "value provided twice for argument {arg}. prev was: {prev}, new was {new}"
+                    )
+                }
+            }
+        }
+    }
+
+    impl error::Error for OutputTypeError {}
 
     impl ArgvResource for OutputType {
         type ArgvParseError = OutputTypeError;
@@ -119,6 +143,24 @@ pub mod argv {
         },
     }
 
+    impl fmt::Display for GlobalFlagsError {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                Self::NoValFor(arg_name) => {
+                    write!(f, "no value provided for {arg_name}")
+                }
+                Self::ValArgTwice { arg, prev, new } => {
+                    write!(
+                        f,
+                        "value provided twice for argument {arg}. prev was: {prev}, new was {new}"
+                    )
+                }
+            }
+        }
+    }
+
+    impl error::Error for GlobalFlagsError {}
+
     impl ArgvResource for GlobalFlags {
         type ArgvParseError = GlobalFlagsError;
         fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError> {
@@ -171,6 +213,28 @@ pub mod argv {
                 value: String,
             },
         }
+
+        impl fmt::Display for ModificationSequenceError {
+            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                match self {
+                    Self::NoValFor(arg_name) => {
+                        write!(f, "no value provided for {arg_name}")
+                    }
+                    Self::Unrecognized { context, value } => {
+                        write!(f, "unrecognized {context}: {value}")
+                    }
+                    Self::ValidationFailed {
+                        codec,
+                        context,
+                        value,
+                    } => {
+                        write!(f, "{codec} for {context}: {value}")
+                    }
+                }
+            }
+        }
+
+        impl error::Error for ModificationSequenceError {}
 
         struct CompressionArgs {
             pub args: Vec<CompressionArg>,
