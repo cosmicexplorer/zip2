@@ -163,6 +163,13 @@ pub mod resource {
     pub trait ArgvResource: Resource + Sized {
         type ArgvParseError;
         fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError>;
+
+        fn parse_argv_from(
+            argv: impl IntoIterator<Item = OsString>,
+        ) -> Result<Self, Self::ArgvParseError> {
+            let mut argv: VecDeque<OsString> = argv.into_iter().map(|s| s.into()).collect();
+            Self::parse_argv(&mut argv)
+        }
     }
 
     pub trait SchemaResource: Resource + Sized {
