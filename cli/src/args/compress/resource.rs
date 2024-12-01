@@ -202,6 +202,10 @@ pub mod json_resource {
             match v {
                 JsonValue::Null => Ok(Self::default()),
                 /* <string> => {"file": {"path": <string>, "append": false}}} */
+                JsonValue::Short(path) => Ok(Self::File {
+                    path: path.as_str().into(),
+                    append: false,
+                }),
                 JsonValue::String(path) => Ok(Self::File {
                     path: path.into(),
                     append: false,
@@ -243,6 +247,10 @@ pub mod json_resource {
                     } else if let Some(o) = o.get("file") {
                         match o {
                             /* {"file": <string>} => {"file": {"path": <string>, append: false}} */
+                            JsonValue::Short(path) => Ok(Self::File {
+                                path: path.as_str().into(),
+                                append: false,
+                            }),
                             JsonValue::String(path) => Ok(Self::File {
                                 path: path.into(),
                                 append: false,
@@ -251,6 +259,7 @@ pub mod json_resource {
                             JsonValue::Object(o) => {
                                 let path: PathBuf = if let Some(path) = o.get("path") {
                                     match path {
+                                        JsonValue::Short(path) => Ok(path.as_str().into()),
                                         JsonValue::String(path) => Ok(path.into()),
                                         _ => Err(JsonSchemaError::InvalidType {
                                             val: path.clone(),
@@ -319,6 +328,9 @@ pub mod json_resource {
                         o.get("archive-comment")
                     {
                         match archive_comment {
+                            JsonValue::Short(archive_comment) => {
+                                Ok(Some(archive_comment.as_str().into()))
+                            }
                             JsonValue::String(archive_comment) => Ok(Some(archive_comment.into())),
                             JsonValue::Null => Ok(None),
                             _ => Err(JsonSchemaError::InvalidType {
@@ -339,6 +351,91 @@ pub mod json_resource {
                     context: "the top-level global flags object",
                 }),
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        #[test]
+        fn parse_output_type() {
+            assert_eq!(
+                OutputType::Stdout { allow_tty: false },
+                OutputType::default()
+            );
+
+            assert_eq!(
+                OutputType::Stdout { allow_tty: true },
+                OutputType::parse_schema_str("true").unwrap(),
+            );
+            assert_eq!(
+                OutputType::Stdout { allow_tty: false },
+                OutputType::parse_schema_str("false").unwrap(),
+            );
+            assert_eq!(
+                OutputType::default(),
+                OutputType::parse_schema_str("null").unwrap(),
+            );
+
+            assert_eq!(
+                OutputType::File {
+                    path: "asdf".into(),
+                    append: false
+                },
+                OutputType::parse_schema_str("\"asdf\"").unwrap(),
+            );
+
+            assert_eq!(
+                OutputType::File {
+                    path: "asdf".into(),
+                    append: false
+                },
+                OutputType::parse_schema_str("{\"file\": \"asdf\"}").unwrap(),
+            );
+            assert_eq!(
+                OutputType::File {
+                    path: "asdf".into(),
+                    append: true
+                },
+                OutputType::parse_schema_str("{\"file\": {\"path\": \"asdf\", \"append\": true}}")
+                    .unwrap(),
+            );
+            assert_eq!(
+                OutputType::File {
+                    path: "asdf".into(),
+                    append: false
+                },
+                OutputType::parse_schema_str("{\"file\": {\"path\": \"asdf\", \"append\": false}}")
+                    .unwrap(),
+            );
+        }
+
+        #[test]
+        fn parse_global_flags() {
+            assert_eq!(
+                GlobalFlags {
+                    archive_comment: None
+                },
+                GlobalFlags::default(),
+            );
+            assert_eq!(
+                GlobalFlags::default(),
+                GlobalFlags::parse_schema_str("null").unwrap(),
+            );
+
+            assert_eq!(
+                GlobalFlags {
+                    archive_comment: Some("aaaaasdf".into()),
+                },
+                GlobalFlags::parse_schema_str("{\"archive-comment\": \"aaaaasdf\"}").unwrap(),
+            );
+            assert_eq!(
+                GlobalFlags {
+                    archive_comment: None,
+                },
+                GlobalFlags::parse_schema_str("{\"archive-comment\": null}").unwrap(),
+            );
         }
     }
 }
