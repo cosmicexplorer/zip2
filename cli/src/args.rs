@@ -157,11 +157,21 @@ pub mod resource {
 
     use crate::schema::{backends::Backend, transformers::WrapperError};
 
+    use std::error;
+
+    pub trait ResourceValue {}
+
     pub trait Resource {
         const ID: &'static str;
-        type Value;
-        type Args;
-        fn declare(args: Self::Args) -> Self;
+        type Value: ResourceValue
+        where
+            Self: Sized;
+        type Args
+        where
+            Self: Sized;
+        fn declare(args: Self::Args) -> Self
+        where
+            Self: Sized;
     }
 
     pub trait ArgvResource: Resource {
@@ -169,32 +179,93 @@ pub mod resource {
         fn parse_argv(
             &self,
             argv: &mut VecDeque<OsString>,
-        ) -> Result<<Self as Resource>::Value, Self::ArgvParseError>;
+        ) -> Result<<Self as Resource>::Value, Self::ArgvParseError>
+        where
+            <Self as Resource>::Value: Sized,
+            Self: Sized;
+
+        fn parse_argv_dyn(
+            &self,
+            argv: &mut VecDeque<OsString>,
+        ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>>
+        where
+            Self::ArgvParseError: error::Error,
+            Self: Sized,
+        {
+            self.parse_argv(argv)
+                .map(|val| {
+                    let val: Box<dyn ResourceValue> = Box::new(val);
+                    val
+                })
+                .map_err(|e| {
+                    let e: Box<dyn error::Error> = Box::new(e);
+                    e
+                })
+        }
 
         #[cfg(test)]
         fn parse_argv_from(
             &self,
             argv: impl IntoIterator<Item = impl Into<OsString>>,
-        ) -> Result<<Self as Resource>::Value, Self::ArgvParseError> {
+        ) -> Result<<Self as Resource>::Value, Self::ArgvParseError>
+        where
+            <Self as Resource>::Value: Sized,
+            Self: Sized,
+        {
             let mut argv: VecDeque<OsString> = argv.into_iter().map(|s| s.into()).collect();
             self.parse_argv(&mut argv)
         }
 
         #[cfg(test)]
-        fn parse_argv_from_empty(&self) -> Result<<Self as Resource>::Value, Self::ArgvParseError> {
+        fn parse_argv_from_empty(&self) -> Result<<Self as Resource>::Value, Self::ArgvParseError>
+        where
+            <Self as Resource>::Value: Sized,
+            Self: Sized,
+        {
             self.parse_argv_from(Vec::<OsString>::new())
         }
     }
 
-    pub trait PositionalArgvResource: ArgvResource {}
+    pub trait PositionalArgvResource: ArgvResource {
+        /* fn parse_argv_ensure_complete( */
+        /*     &self, */
+        /*     mut argv: VecDeque<OsString>, */
+        /* ) -> Result<<Self as Resource>::Value, Self::ArgvParseError> */
+        /* where */
+        /*     <Self as Resource>::Value: Sized, */
+        /*     Self: Sized, */
+        /* { */
+        /*     let ret = self.parse_argv(&mut argv)?; */
+        /*     assert!(argv.is_empty(), "argv should have been drained: {argv:?}"); */
+        /*     Ok(ret) */
+        /* } */
 
-    pub trait SchemaResource: Resource + Sized {
+        /* fn parse_argv_ensure_complete_dyn( */
+        /*     &self, */
+        /*     mut argv: VecDeque<OsString>, */
+        /* ) -> Result<Box<dyn ResourceValue + '_>, Box<dyn error::Error + '_>> { */
+        /*     self.parse_argv_ensure_complete(argv) */
+        /*         .map(|val| { */
+        /*             let val: Box<dyn ResourceValue> = Box::new(val); */
+        /*             val */
+        /*         }) */
+        /*         .map_err(|e| { */
+        /*             let e: Box<dyn error::Error> = Box::new(e); */
+        /*             e */
+        /*         }) */
+        /* } */
+    }
+
+    pub trait SchemaResource: Resource {
         type B: Backend;
         type SchemaParseError;
         fn parse_schema<'a>(
             &self,
             v: <Self::B as Backend>::Val<'a>,
-        ) -> Result<<Self as Resource>::Value, Self::SchemaParseError>;
+        ) -> Result<<Self as Resource>::Value, Self::SchemaParseError>
+        where
+            <Self as Resource>::Value: Sized,
+            Self: Sized;
 
         fn parse_schema_str<'a>(
             &self,
@@ -202,14 +273,18 @@ pub mod resource {
         ) -> Result<
             <Self as Resource>::Value,
             WrapperError<<Self::B as Backend>::Err<'a>, Self::SchemaParseError>,
-        > {
+        >
+        where
+            <Self as Resource>::Value: Sized,
+            Self: Sized,
+        {
             let v = <Self::B as Backend>::parse(s).map_err(WrapperError::In)?;
             Ok(self.parse_schema(v).map_err(WrapperError::Out)?)
         }
     }
 
     pub trait CommandSpec {
-        /* fn resources() -> Vec<A>; */
+        /* fn resources(&self) -> Vec<Box<dyn ArgvResource>>; */
     }
 }
 
