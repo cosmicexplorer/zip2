@@ -3,6 +3,8 @@ use crate::args::resource::*;
 
 pub struct OutputFlagsResource;
 
+impl ResourceValue for OutputType {}
+
 impl Resource for OutputFlagsResource {
     const ID: &'static str = "OUTPUT-FLAGS";
     type Value = OutputType;
@@ -14,6 +16,8 @@ impl Resource for OutputFlagsResource {
 
 pub struct GlobalFlagsResource;
 
+impl ResourceValue for GlobalFlags {}
+
 impl Resource for GlobalFlagsResource {
     const ID: &'static str = "GLOBAL-FLAGS";
     type Value = GlobalFlags;
@@ -24,6 +28,8 @@ impl Resource for GlobalFlagsResource {
 }
 
 pub struct ModSeqResource;
+
+impl ResourceValue for ModificationSequence {}
 
 impl Resource for ModSeqResource {
     const ID: &'static str = "MOD-SEQ";
