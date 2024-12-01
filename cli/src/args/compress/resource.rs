@@ -1,16 +1,37 @@
 use super::*;
 use crate::args::resource::*;
 
-impl Resource for OutputType {
+pub struct OutputFlagsResource;
+
+impl Resource for OutputFlagsResource {
     const ID: &'static str = "OUTPUT-FLAGS";
+    type Value = OutputType;
+    type Args = ();
+    fn declare(args: Self::Args) -> Self {
+        Self
+    }
 }
 
-impl Resource for GlobalFlags {
+pub struct GlobalFlagsResource;
+
+impl Resource for GlobalFlagsResource {
     const ID: &'static str = "GLOBAL-FLAGS";
+    type Value = GlobalFlags;
+    type Args = ();
+    fn declare(args: Self::Args) -> Self {
+        Self
+    }
 }
 
-impl Resource for ModificationSequence {
+pub struct ModSeqResource;
+
+impl Resource for ModSeqResource {
     const ID: &'static str = "MOD-SEQ";
+    type Value = ModificationSequence;
+    type Args = ();
+    fn declare(args: Self::Args) -> Self {
+        Self
+    }
 }
 
 pub mod argv {
@@ -54,9 +75,12 @@ pub mod argv {
 
     impl error::Error for OutputTypeError {}
 
-    impl ArgvResource for OutputType {
+    impl ArgvResource for OutputFlagsResource {
         type ArgvParseError = OutputTypeError;
-        fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError> {
+        fn parse_argv(
+            &self,
+            argv: &mut VecDeque<OsString>,
+        ) -> Result<OutputType, Self::ArgvParseError> {
             let mut allow_stdout: bool = false;
             let mut append_to_output_path: bool = false;
             let mut output_path: Option<PathBuf> = None;
@@ -121,12 +145,12 @@ pub mod argv {
             }
 
             Ok(if let Some(output_path) = output_path {
-                Self::File {
+                OutputType::File {
                     path: output_path,
                     append: append_to_output_path,
                 }
             } else {
-                Self::Stdout {
+                OutputType::Stdout {
                     allow_tty: allow_stdout,
                 }
             })
@@ -161,9 +185,12 @@ pub mod argv {
 
     impl error::Error for GlobalFlagsError {}
 
-    impl ArgvResource for GlobalFlags {
+    impl ArgvResource for GlobalFlagsResource {
         type ArgvParseError = GlobalFlagsError;
-        fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError> {
+        fn parse_argv(
+            &self,
+            argv: &mut VecDeque<OsString>,
+        ) -> Result<GlobalFlags, Self::ArgvParseError> {
             let mut archive_comment: Option<OsString> = None;
 
             while let Some(arg) = argv.pop_front() {
@@ -188,7 +215,7 @@ pub mod argv {
                 }
             }
 
-            Ok(Self { archive_comment })
+            Ok(GlobalFlags { archive_comment })
         }
     }
 
@@ -588,14 +615,19 @@ pub mod argv {
             }
         }
 
-        impl ArgvResource for ModificationSequence {
+        impl ArgvResource for ModSeqResource {
             type ArgvParseError = WrapperError<ModificationSequenceError, CommandError>;
-            fn parse_argv(argv: &mut VecDeque<OsString>) -> Result<Self, Self::ArgvParseError> {
+            fn parse_argv(
+                &self,
+                argv: &mut VecDeque<OsString>,
+            ) -> Result<ModificationSequence, Self::ArgvParseError> {
                 let compression_args =
                     CompressionArgs::parse_argv(argv).map_err(WrapperError::In)?;
                 compression_args.build_mod_seq().map_err(WrapperError::Out)
             }
         }
+
+        impl PositionalArgvResource for ModSeqResource {}
     }
     use compression_args::{CompressionArgs, ModificationSequenceError};
 
@@ -605,14 +637,16 @@ pub mod argv {
 
         #[test]
         fn parse_output_type() {
+            let output = OutputFlagsResource::declare(());
+
             assert_eq!(
                 OutputType::default(),
-                OutputType::parse_argv_from_empty().unwrap()
+                output.parse_argv_from_empty().unwrap()
             );
 
             assert_eq!(
                 OutputType::Stdout { allow_tty: true },
-                OutputType::parse_argv_from(["--stdout"]).unwrap()
+                output.parse_argv_from(["--stdout"]).unwrap()
             );
 
             assert_eq!(
@@ -620,37 +654,43 @@ pub mod argv {
                     path: "asdf".into(),
                     append: false
                 },
-                OutputType::parse_argv_from(["-o", "asdf"]).unwrap()
+                output.parse_argv_from(["-o", "asdf"]).unwrap()
             );
             assert_eq!(
                 OutputType::File {
                     path: "asdf".into(),
                     append: true
                 },
-                OutputType::parse_argv_from(["--append", "-o", "asdf"]).unwrap()
+                output.parse_argv_from(["--append", "-o", "asdf"]).unwrap()
             );
         }
 
         #[test]
         fn parse_global_flags() {
+            let global_flags = GlobalFlagsResource::declare(());
+
             assert_eq!(
                 GlobalFlags::default(),
-                GlobalFlags::parse_argv_from_empty().unwrap(),
+                global_flags.parse_argv_from_empty().unwrap(),
             );
 
             assert_eq!(
                 GlobalFlags {
                     archive_comment: Some("asdf".into())
                 },
-                GlobalFlags::parse_argv_from(["--archive-comment", "asdf"]).unwrap()
+                global_flags
+                    .parse_argv_from(["--archive-comment", "asdf"])
+                    .unwrap()
             );
         }
 
         #[test]
         fn parse_mod_seq() {
+            let mod_seq = ModSeqResource::declare(());
+
             assert_eq!(
                 ModificationSequence::default(),
-                ModificationSequence::parse_argv_from_empty().unwrap(),
+                mod_seq.parse_argv_from_empty().unwrap(),
             );
 
             assert_eq!(
@@ -664,7 +704,7 @@ pub mod argv {
                         },
                     }],
                 },
-                ModificationSequence::parse_argv_from(["-f", "file.txt"]).unwrap(),
+                mod_seq.parse_argv_from(["-f", "file.txt"]).unwrap(),
             );
         }
     }
@@ -672,7 +712,10 @@ pub mod argv {
 
 #[cfg(feature = "json")]
 pub mod json_resource {
-    use super::{GlobalFlags, OutputType};
+    use super::{
+        GlobalFlags, GlobalFlagsResource, ModSeqResource, ModificationSequence,
+        OutputFlagsResource, OutputType, Resource,
+    };
     use crate::{
         args::resource::SchemaResource,
         schema::backends::{json_backend::JsonBackend, Backend},
@@ -730,33 +773,34 @@ pub mod json_resource {
 
     impl error::Error for JsonSchemaError {}
 
-    impl SchemaResource for OutputType {
+    impl SchemaResource for OutputFlagsResource {
         type B = JsonBackend;
         type SchemaParseError = JsonSchemaError;
 
         fn parse_schema<'a>(
+            &self,
             v: <Self::B as Backend>::Val<'a>,
-        ) -> Result<Self, Self::SchemaParseError> {
+        ) -> Result<OutputType, Self::SchemaParseError> {
             match v {
-                JsonValue::Null => Ok(Self::default()),
+                JsonValue::Null => Ok(OutputType::default()),
                 /* <string> => {"file": {"path": <string>, "append": false}}} */
-                JsonValue::Short(path) => Ok(Self::File {
+                JsonValue::Short(path) => Ok(OutputType::File {
                     path: path.as_str().into(),
                     append: false,
                 }),
-                JsonValue::String(path) => Ok(Self::File {
+                JsonValue::String(path) => Ok(OutputType::File {
                     path: path.into(),
                     append: false,
                 }),
                 /* <bool> => {"stdout": {"allow_tty": <bool>}} */
-                JsonValue::Boolean(allow_tty) => Ok(Self::Stdout { allow_tty }),
+                JsonValue::Boolean(allow_tty) => Ok(OutputType::Stdout { allow_tty }),
                 /* An object--destructure by enum case. */
                 JsonValue::Object(o) => {
                     if let Some(o) = o.get("stdout") {
                         match o {
-                            JsonValue::Null => Ok(Self::Stdout { allow_tty: false }),
+                            JsonValue::Null => Ok(OutputType::Stdout { allow_tty: false }),
                             /* {"stdout": <bool>} => {"stdout": {"allow_tty": <bool>}} */
-                            JsonValue::Boolean(allow_tty) => Ok(Self::Stdout {
+                            JsonValue::Boolean(allow_tty) => Ok(OutputType::Stdout {
                                 allow_tty: *allow_tty,
                             }),
                             /* {"stdout": {"allow_tty": <bool>}} => {"stdout": {"allow_tty": <bool>}} */
@@ -774,7 +818,7 @@ pub mod json_resource {
                                 } else {
                                     Ok(false)
                                 }?;
-                                Ok(Self::Stdout { allow_tty })
+                                Ok(OutputType::Stdout { allow_tty })
                             }
                             _ => Err(JsonSchemaError::InvalidType {
                                 val: o.clone(),
@@ -785,11 +829,11 @@ pub mod json_resource {
                     } else if let Some(o) = o.get("file") {
                         match o {
                             /* {"file": <string>} => {"file": {"path": <string>, append: false}} */
-                            JsonValue::Short(path) => Ok(Self::File {
+                            JsonValue::Short(path) => Ok(OutputType::File {
                                 path: path.as_str().into(),
                                 append: false,
                             }),
-                            JsonValue::String(path) => Ok(Self::File {
+                            JsonValue::String(path) => Ok(OutputType::File {
                                 path: path.into(),
                                 append: false,
                             }),
@@ -827,7 +871,7 @@ pub mod json_resource {
                                 } else {
                                     Ok(false)
                                 }?;
-                                Ok(Self::File { path, append })
+                                Ok(OutputType::File { path, append })
                             }
                             _ => Err(JsonSchemaError::InvalidType {
                                 val: o.clone(),
@@ -853,13 +897,14 @@ pub mod json_resource {
         }
     }
 
-    impl SchemaResource for GlobalFlags {
+    impl SchemaResource for GlobalFlagsResource {
         type B = JsonBackend;
         type SchemaParseError = JsonSchemaError;
 
         fn parse_schema<'a>(
+            &self,
             v: <Self::B as Backend>::Val<'a>,
-        ) -> Result<Self, Self::SchemaParseError> {
+        ) -> Result<GlobalFlags, Self::SchemaParseError> {
             match v {
                 JsonValue::Object(o) => {
                     let archive_comment: Option<OsString> = if let Some(archive_comment) =
@@ -880,9 +925,9 @@ pub mod json_resource {
                     } else {
                         Ok(None)
                     }?;
-                    Ok(Self { archive_comment })
+                    Ok(GlobalFlags { archive_comment })
                 }
-                JsonValue::Null => Ok(Self::default()),
+                JsonValue::Null => Ok(GlobalFlags::default()),
                 _ => Err(JsonSchemaError::InvalidType {
                     val: v.clone(),
                     valid_types: &["object", "null"],
@@ -903,17 +948,19 @@ pub mod json_resource {
                 OutputType::default()
             );
 
+            let output = OutputFlagsResource::declare(());
+
             assert_eq!(
                 OutputType::Stdout { allow_tty: true },
-                OutputType::parse_schema_str("true").unwrap(),
+                output.parse_schema_str("true").unwrap(),
             );
             assert_eq!(
                 OutputType::Stdout { allow_tty: false },
-                OutputType::parse_schema_str("false").unwrap(),
+                output.parse_schema_str("false").unwrap(),
             );
             assert_eq!(
                 OutputType::default(),
-                OutputType::parse_schema_str("null").unwrap(),
+                output.parse_schema_str("null").unwrap(),
             );
 
             assert_eq!(
@@ -921,7 +968,7 @@ pub mod json_resource {
                     path: "asdf".into(),
                     append: false
                 },
-                OutputType::parse_schema_str("\"asdf\"").unwrap(),
+                output.parse_schema_str("\"asdf\"").unwrap(),
             );
 
             assert_eq!(
@@ -929,14 +976,15 @@ pub mod json_resource {
                     path: "asdf".into(),
                     append: false
                 },
-                OutputType::parse_schema_str("{\"file\": \"asdf\"}").unwrap(),
+                output.parse_schema_str("{\"file\": \"asdf\"}").unwrap(),
             );
             assert_eq!(
                 OutputType::File {
                     path: "asdf".into(),
                     append: true
                 },
-                OutputType::parse_schema_str("{\"file\": {\"path\": \"asdf\", \"append\": true}}")
+                output
+                    .parse_schema_str("{\"file\": {\"path\": \"asdf\", \"append\": true}}")
                     .unwrap(),
             );
             assert_eq!(
@@ -944,7 +992,8 @@ pub mod json_resource {
                     path: "asdf".into(),
                     append: false
                 },
-                OutputType::parse_schema_str("{\"file\": {\"path\": \"asdf\", \"append\": false}}")
+                output
+                    .parse_schema_str("{\"file\": {\"path\": \"asdf\", \"append\": false}}")
                     .unwrap(),
             );
         }
@@ -957,22 +1006,29 @@ pub mod json_resource {
                 },
                 GlobalFlags::default(),
             );
+
+            let global_flags = GlobalFlagsResource::declare(());
+
             assert_eq!(
                 GlobalFlags::default(),
-                GlobalFlags::parse_schema_str("null").unwrap(),
+                global_flags.parse_schema_str("null").unwrap(),
             );
 
             assert_eq!(
                 GlobalFlags {
                     archive_comment: Some("aaaaasdf".into()),
                 },
-                GlobalFlags::parse_schema_str("{\"archive-comment\": \"aaaaasdf\"}").unwrap(),
+                global_flags
+                    .parse_schema_str("{\"archive-comment\": \"aaaaasdf\"}")
+                    .unwrap(),
             );
             assert_eq!(
                 GlobalFlags {
                     archive_comment: None,
                 },
-                GlobalFlags::parse_schema_str("{\"archive-comment\": null}").unwrap(),
+                global_flags
+                    .parse_schema_str("{\"archive-comment\": null}")
+                    .unwrap(),
             );
         }
     }
