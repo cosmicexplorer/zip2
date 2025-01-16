@@ -1,5 +1,8 @@
 //! Pipelined extraction into a filesystem directory.
 
+#![allow(clippy::needless_lifetimes)]
+#![allow(unknown_lints)]
+#![allow(non_local_definitions)]
 #![cfg_attr(not(unix), allow(dead_code))]
 
 pub mod path_splitting {
@@ -221,14 +224,14 @@ pub mod path_splitting {
             );
         }
 
+        impl DirByMode for usize {
+            fn is_dir_by_mode(&self) -> bool {
+                false
+            }
+        }
+
         #[test]
         fn lex_trie() {
-            impl DirByMode for usize {
-                fn is_dir_by_mode(&self) -> bool {
-                    false
-                }
-            }
-
             assert_eq!(
                 lexicographic_entry_trie([
                     ("a/b/", 1usize),

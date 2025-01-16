@@ -1,5 +1,6 @@
 //! Traits for splitting and teeing file contents into multiple parallel streams.
 
+#![allow(clippy::needless_lifetimes)]
 #![cfg_attr(not(unix), allow(dead_code))]
 
 macro_rules! interruptible_buffered_io_op {
