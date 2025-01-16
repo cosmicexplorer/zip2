@@ -61,12 +61,6 @@ pub mod path_splitting {
                 }
             }
         }
-        if ret.is_empty() {
-            return Err(PathSplitError::ExtractionPathEscapesDirectory(
-                entry_path,
-                "path resolves to the top-level directory",
-            ));
-        }
 
         Ok((ret, is_dir))
     }
@@ -131,6 +125,13 @@ pub mod path_splitting {
             /* Split entries by directory components, and normalize any non-literal paths
              * (e.g. '..', '.', leading '/', repeated '/'). */
             let (all_components, is_dir) = normalize_parent_dirs(entry_path)?;
+
+            /* If the entry resolves to the top-level directory, we don't error, but instead just
+             * avoid writing any data to that directory entry. */
+            if all_components.is_empty() {
+                continue;
+            }
+
             /* If the entry is a directory by mode, then it does not need to end in '/'. */
             let is_dir = is_dir || data.is_dir_by_mode();
             /* Split basename and dirname. */
@@ -209,7 +210,7 @@ pub mod path_splitting {
                 (vec!["a\\b"], true)
             );
             assert!(normalize_parent_dirs("a/../../b").is_err());
-            assert!(normalize_parent_dirs("./").is_err());
+            assert_eq!(normalize_parent_dirs("./").unwrap(), (vec![], true));
         }
 
         #[test]
