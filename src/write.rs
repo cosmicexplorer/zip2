@@ -246,6 +246,7 @@ pub(crate) enum EncryptWith<'k> {
 impl hash::Hash for EncryptWith<'_> {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         match self {
+            #[cfg(feature = "aes-crypto")]
             Self::Aes {mode, password} => {
                 mode.hash(state);
                 password.hash(state);

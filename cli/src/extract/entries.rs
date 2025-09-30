@@ -7,8 +7,8 @@ use zip::{
 
 use crate::{CommandError, WrapCommandErr};
 
-pub trait IterateEntries {
-    fn next_entry(&mut self) -> Result<Option<ZipFile>, CommandError>;
+pub trait IterateEntries<R: io::Read> {
+    fn next_entry(&mut self) -> Result<Option<ZipFile<R>>, CommandError>;
 }
 
 pub struct ReadChecker<R> {
@@ -70,11 +70,11 @@ impl<R> StreamInput<R> {
     }
 }
 
-impl<R> IterateEntries for StreamInput<R>
+impl<R> IterateEntries<ReadChecker<R>> for StreamInput<R>
 where
     R: io::Read,
 {
-    fn next_entry(&mut self) -> Result<Option<ZipFile>, CommandError> {
+    fn next_entry(&mut self) -> Result<Option<ZipFile<ReadChecker<R>>>, CommandError> {
         if let Some(entry) = read_zipfile_from_stream(&mut self.inner)
             .wrap_err("failed to read zip entries from stdin")?
         {
@@ -114,11 +114,11 @@ where
     }
 }
 
-impl<A> IterateEntries for ZipFileInput<A>
+impl<A> IterateEntries<fs::File> for ZipFileInput<A>
 where
     A: ops::DerefMut<Target = ZipArchive<fs::File>>,
 {
-    fn next_entry(&mut self) -> Result<Option<ZipFile>, CommandError> {
+    fn next_entry(&mut self) -> Result<Option<ZipFile<fs::File>>, CommandError> {
         if self.none_left() {
             return Ok(None);
         }

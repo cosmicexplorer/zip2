@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::PathBuf,
 };
 
@@ -47,12 +47,12 @@ impl ArchiveWithPath {
     }
 }
 
-fn format_entry_info(
+fn format_entry_info<R: Read>(
     mut err: impl Write,
     entry_formatter: &CompiledFormatSpec<CompiledEntryDirective>,
     matcher: Option<&CompiledMatcher>,
     mut output_stream: impl Write,
-    source: &mut impl IterateEntries,
+    source: &mut impl IterateEntries<R>,
 ) -> Result<(), CommandError> {
     if entry_formatter.is_empty() {
         writeln!(

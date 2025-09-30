@@ -19,7 +19,7 @@ use entries::{IterateEntries, StreamInput, ZipFileInput};
 use receiver::{CompiledEntrySpec, EntryData, EntryKind, EntryReceiver, ExtractEntry};
 
 fn maybe_process_symlink<'a, 't>(
-    entry: &mut ZipFile<'a>,
+    entry: &mut ZipFile<'a, impl Read>,
     err: &Rc<RefCell<impl Write>>,
     symlink_target: &'t mut Vec<u8>,
 ) -> Result<Option<&'t mut [u8]>, CommandError> {
@@ -54,7 +54,7 @@ fn maybe_process_symlink<'a, 't>(
 }
 
 fn process_entry<'a, 'w, 'c, 'it>(
-    mut entry: ZipFile<'a>,
+    mut entry: ZipFile<'a, impl Read>,
     err: &Rc<RefCell<impl Write>>,
     compiled_specs: impl Iterator<Item = &'it CompiledEntrySpec<'w>>,
     copy_buf: &mut [u8],

@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     cell::RefCell,
     fmt, fs,
-    io::{self, Write},
+    io::{self, Read, Write},
     mem,
     path::{Path, PathBuf},
     rc::Rc,
@@ -44,7 +44,7 @@ pub struct EntryData<'a> {
 
 impl<'a> EntryData<'a> {
     #[inline(always)]
-    pub fn from_entry<'b>(entry: &'a ZipFile<'b>) -> Self {
+    pub fn from_entry<'b>(entry: &'a ZipFile<'b, impl Read>) -> Self {
         Self {
             name: entry.name(),
             kind: if entry.is_dir() {
@@ -68,6 +68,7 @@ impl<'a> EntryData<'a> {
                 .extra_data_fields()
                 .find_map(|f| match f {
                     ExtraField::ExtendedTimestamp(ts) => Some(ts),
+                    ExtraField::Ntfs(_) => todo!(),
                 })
                 .cloned(),
         }
